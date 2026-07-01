@@ -264,6 +264,26 @@ def corner_deliveries(ctx: MatchContext, team: str) -> pd.DataFrame:
     return corners
 
 
+def set_piece_shots(ctx: MatchContext, team: str) -> pd.DataFrame:
+    """All shots a team created from set-pieces (corners, free-kicks, throw-ins).
+
+    Broader than the indirect-free-kick bar section: this includes direct
+    free-kick shots too, since the map is about every set-piece chance created.
+    Goals are flagged from the shot ``result`` (``SUCCESS``).
+    """
+    ev = ctx.match_events
+    categories = list(CORNER_CATEGORIES) + [FREE_KICK_CATEGORY, THROW_IN_CATEGORY]
+    shots = ev.loc[
+        (ev["actionType"] == "SHOT")
+        & (ev["attackingSquadName"] == team)
+        & (ev["setPieceCategory"].isin(categories))
+    ].copy()
+    if shots.empty:
+        return shots.assign(is_goal=pd.Series(dtype=bool))
+    shots["is_goal"] = shots["result"].astype(str).eq("SUCCESS")
+    return shots
+
+
 def fk_deliveries(ctx: MatchContext, team: str) -> pd.DataFrame:
     ev = ctx.match_events
     fks = ev.loc[_indirect_fk_delivery(ev) & (ev["attackingSquadName"] == team)].copy()

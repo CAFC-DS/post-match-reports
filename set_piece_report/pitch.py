@@ -84,19 +84,35 @@ def _pitch(half: bool, pad_bottom: float, figsize) -> tuple:
 # --------------------------------------------------------------------------- #
 # Corner overview
 # --------------------------------------------------------------------------- #
+def _danger_cmap() -> LinearSegmentedColormap:
+    return LinearSegmentedColormap.from_list(
+        "sp_heat", [PITCH_SURFACE, "#EAD6A6", "#DCA23F", "#C0522B"]
+    )
+
+
 def corner_overview(deliveries: pd.DataFrame) -> str:
-    """Attacking corner delivery map, zoomed on the final third / box."""
+    """Attacking corner delivery map: soft danger zones under the arrows."""
     # Crop to roughly the final 32m so the box fills the frame (landscape).
     pitch, fig, ax = _pitch(half=True, pad_bottom=-20.5, figsize=(5.2, 3.2))
 
     if deliveries is not None and not deliveries.empty:
         sx, sy = _to_pitch(deliveries["startAdjCoordinatesX"], deliveries["startAdjCoordinatesY"])
         ex, ey = _to_pitch(deliveries["endAdjCoordinatesX"], deliveries["endAdjCoordinatesY"])
+        # danger-zone shading = where deliveries land (needs a few points to be stable)
+        valid = ex.notna() & ey.notna()
+        if valid.sum() >= 4:
+            try:
+                pitch.kdeplot(
+                    ex[valid], ey[valid], ax=ax, fill=True, levels=30,
+                    thresh=0.15, cmap=_danger_cmap(), alpha=0.30, zorder=1,
+                )
+            except Exception:
+                pass
         for i, (_, row) in enumerate(deliveries.reset_index(drop=True).iterrows()):
             colour = CORNER_TYPE_COLORS.get(row["corner_type"], RED)
             pitch.lines(
                 sx.iloc[i], sy.iloc[i], ex.iloc[i], ey.iloc[i], ax=ax,
-                color=colour, lw=2.4, comet=True, alpha=0.85, zorder=3,
+                color=colour, lw=2.4, comet=True, alpha=0.9, zorder=3,
                 capstyle="round",
             )
             won = row["first_touch"] == "won"
@@ -125,13 +141,10 @@ def free_kick_overview(deliveries: pd.DataFrame) -> str:
         sx, sy = _to_pitch(deliveries["startAdjCoordinatesX"], deliveries["startAdjCoordinatesY"])
         valid_end = ex.notna() & ey.notna()
         if valid_end.sum() >= 5:
-            cmap = LinearSegmentedColormap.from_list(
-                "sp_heat", [PITCH_SURFACE, "#EAD6A6", "#DCA23F", "#C0522B"]
-            )
             try:
                 pitch.kdeplot(
                     ex[valid_end], ey[valid_end], ax=ax, fill=True, levels=40,
-                    thresh=0.12, cmap=cmap, alpha=0.32, zorder=1,
+                    thresh=0.12, cmap=_danger_cmap(), alpha=0.32, zorder=1,
                 )
             except Exception:
                 pass
@@ -159,8 +172,53 @@ def free_kick_overview(deliveries: pd.DataFrame) -> str:
 
 
 # --------------------------------------------------------------------------- #
+# Set-piece shot map
+# --------------------------------------------------------------------------- #
+_SHOT_NONGOAL = "#7F8DA3"
+
+
+def _shot_sizes(xg: pd.Series) -> pd.Series:
+    clean = pd.to_numeric(xg, errors="coerce").fillna(0.03).clip(lower=0.01, upper=0.6)
+    return 34 + (clean / 0.6) * 300
+
+
+def set_piece_shot_map(shots: pd.DataFrame) -> str:
+    """Half-pitch of shots created from set-pieces; dot size = xG, goals in red."""
+    pitch, fig, ax = _pitch(half=True, pad_bottom=-16, figsize=(5.0, 3.4))
+
+    if shots is not None and not shots.empty:
+        sx, sy = _to_pitch(shots["startAdjCoordinatesX"], shots["startAdjCoordinatesY"])
+        sizes = _shot_sizes(shots["SHOT_XG"]).reset_index(drop=True)
+        goal = shots["is_goal"].reset_index(drop=True)
+        sx = sx.reset_index(drop=True)
+        sy = sy.reset_index(drop=True)
+        if (~goal).any():
+            pitch.scatter(
+                sx[~goal], sy[~goal], ax=ax, s=sizes[~goal], color=_SHOT_NONGOAL,
+                edgecolors=PITCH_SURFACE, linewidth=0.7, alpha=0.8, zorder=3,
+            )
+        if goal.any():
+            # goals always read clearly, even from a low-xG finish
+            goal_sizes = sizes[goal].clip(lower=110)
+            pitch.scatter(
+                sx[goal], sy[goal], ax=ax, s=goal_sizes, color=RED, marker="o",
+                edgecolors="#FFFFFF", linewidth=1.6, zorder=5,
+            )
+    else:
+        ax.text(
+            _PITCH_WID / 2, _PITCH_LEN - 12, "No set-piece shots",
+            ha="center", va="center", color=MUTED, fontsize=9,
+        )
+    return _fig_to_uri(fig)
+
+
+# --------------------------------------------------------------------------- #
 # Legend swatches (kept here so colours have one source of truth)
 # --------------------------------------------------------------------------- #
+def shot_legend_items() -> list[tuple[str, str]]:
+    return [("Shot (size = xG)", _SHOT_NONGOAL), ("Goal", RED)]
+
+
 def corner_legend_items() -> list[tuple[str, str]]:
     from set_piece_report.config import CORNER_TYPE_LABELS, CORNER_TYPE_ORDER
 

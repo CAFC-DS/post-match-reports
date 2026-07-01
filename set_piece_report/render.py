@@ -27,6 +27,7 @@ from set_piece_report.metrics import (  # noqa: E402
     build_report_data,
     corner_deliveries,
     fk_deliveries,
+    set_piece_shots,
 )
 
 TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
@@ -144,6 +145,7 @@ def build_report(
             "badge": _badge_uri(team),
             "corner_img": pitch.corner_overview(corner_deliveries(ctx, team)),
             "fk_img": pitch.free_kick_overview(fk_deliveries(ctx, team)),
+            "shot_img": pitch.set_piece_shot_map(set_piece_shots(ctx, team)),
             "corner_type_counts": report_data.corner_type_counts.get(team, {}),
         }
 
@@ -166,6 +168,7 @@ def build_report(
         "stat_rows": _stat_rows_context(report_data),
         "corner_legend": pitch.corner_legend_items(),
         "fk_legend": pitch.fk_legend_items(),
+        "shot_legend": pitch.shot_legend_items(),
         "contact": _contact_table_context(report_data, ctx.home_team, ctx.away_team),
         "colors": {"up": GREEN, "down": RED},
     }

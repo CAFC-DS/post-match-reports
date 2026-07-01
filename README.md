@@ -13,9 +13,9 @@ Worked example (default): **Swansea City 3–1 Charlton Athletic, 2 May 2026
 | Region | Content |
 | --- | --- |
 | Masthead | Crests, single-line scoreline, competition / season / date |
-| Left & right panels | Each team's **attacking corners** (delivery map coloured by IMPECT corner type — near post / central / far post / short; landing spot ringed when the team won first contact) and **free-kick overview** (delivery map over a threat heatmap) |
+| Left & right panels | Each team's **attacking corners** (delivery arrows coloured by IMPECT corner type — near post / central / far post / short — over a soft danger-zone heatmap; landing spot ringed when the team won first contact) and **free-kick overview** (delivery map over a threat heatmap). Left = home, right = away. |
 | Centre | Split **stat bars** — corners, throw-ins and indirect free-kicks (total + shots / goals / xG created). Each row shows the match value for both teams plus their **season /90** rate and the **% change** vs that rate |
-| Footer tables | **Corner first contacts** and **Free-kick first contacts** — attacking & defending, won / lost / win% — for both teams |
+| Lower band | Each team's **shots from set-pieces** (mini pitch, dot size = xG, goals in red) flanking **corner** and **free-kick first-contact** tables — attacking & defending, won / lost / win% — for both teams |
 
 ## Connections
 
@@ -95,8 +95,11 @@ set-piece-report/
   played (playoff fixtures from 4 May 2026 excluded). **% change** = the single
   match vs that baseline (display capped at +999% / −100%).
 - **Corner type** is the IMPECT delivery zone (`setPieceSubPhaseCornerType`):
-  near post / central / far post / short (worked / open-play).
+  near post / central / far post / short (worked / open-play). The shading under
+  the arrows is a kernel-density heatmap of where deliveries land.
 - **Indirect free-kicks** = free-kicks played into the game, not shot directly.
+- **Shots from set-pieces** includes every shot from a corner, free-kick or
+  throw-in (direct free-kick shots included); goals flagged from shot `result`.
 - **First contact** uses `setPieceSubPhaseFirstTouchWon` (attacking-team view);
   the defending team's wins are the attack's losses. Uncontested / short
   deliveries are excluded from Win%.
