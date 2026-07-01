@@ -1,0 +1,73 @@
+project:
+  team_name: Charlton Athletic
+  competition_name: Championship
+  season: "25/26"
+  local_cache_enabled: true
+  local_cache_format: parquet
+  official_final_position: 19
+  official_points: 53
+  points_adjustments:
+    Leicester City: -6
+    Sheffield Wednesday: -18
+    West Bromwich Albion: -2
+  # Duplicate or out-of-season match IDs to exclude from regular-season aggregation.
+  excluded_match_ids:
+    - 245449   # Duplicate Blackburn v Sheff Wed fixture (3 Feb 2026)
+  # End of league phase. Anything dated on or after this is a playoff fixture
+  # and is excluded from regular-season aggregations.
+  regular_season_cutoff: "2026-05-04"
+  current_squad:
+    # Players who have left the club and should not appear in 25/26 review
+    # recommendations / players-to-monitor cards.
+    excluded:
+      - James Bree
+      - Jayden Fevrier
+      - Harry Clarke      # on loan 25/26
+
+impect_events:
+  active: true
+  required: true
+  database: ${SNOWFLAKE_DATABASE}
+  schema: ${SNOWFLAKE_SCHEMA}
+  table: IMPECT_EVENTS_STAGING
+  filters:
+    competition_name: Championship
+    season: "25/26"
+
+impect_player_iteration_averages:
+  active: true
+  required: false
+  database: ${SNOWFLAKE_DATABASE}
+  schema: ${SNOWFLAKE_SCHEMA}
+  table: IMPECT_PLAYER_ITERATION_AVERAGES
+  filters:
+    competition_name: Championship
+    season: "25/26"
+
+matches:
+  active: false
+  required: false
+  database:
+  schema:
+  table:
+
+team_match_stats:
+  active: false
+  required: false
+  database:
+  schema:
+  table:
+
+player_match_stats:
+  active: false
+  required: false
+  database:
+  schema:
+  table:
+
+glossary:
+  path: data/reference/glossary.csv
+  fallback_paths:
+    - impect_event_kpi_glossary.csv
+    - impect_kpi_glossary.csv
+    - impect_kpi_glossary_combined.csv

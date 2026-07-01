@@ -1,0 +1,19 @@
+# Secrets
+.env
+
+# Data cache / large extracts (pulled from Snowflake or copied locally)
+data/processed/*.parquet
+data/processed/*.csv
+
+# Generated reports
+outputs/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# OS
+.DS_Store

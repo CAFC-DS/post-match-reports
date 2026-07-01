@@ -1,0 +1,350 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8">
+  <title>{{ meta.home_team }} {{ meta.score }} {{ meta.away_team }} — Set Play Analysis</title>
+  <style>
+  @import url("https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap");
+
+  :root {
+    --paper: #FAF6F0;
+    --surface: #FFFFFF;
+    --ink: #1A1A1A;
+    --muted: #5D6470;
+    --faint: #8A8578;
+    --grid: #E8E3D8;
+    --hair: #EDE7DB;
+    --red: #D01012;
+    --red-dark: #A40B0E;
+    --green: #2D8F6A;
+    --home: {{ home_bar }};
+    --away: {{ away_bar }};
+    --font: "Plus Jakarta Sans", "Helvetica Neue", Arial, sans-serif;
+  }
+
+  @page { size: A4 landscape; margin: 7mm 11mm; }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--font);
+    font-feature-settings: "ss01" 1, "tnum" 1, "lnum" 1;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .page { width: 100%; }
+
+  /* ---------------------------------------------------------- masthead --- */
+  .masthead {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    column-gap: 6mm;
+    padding-bottom: 2.5mm;
+    border-bottom: 2px solid var(--red);
+    margin-bottom: 3mm;
+  }
+  .masthead .title {
+    font-size: 13pt; font-weight: 800; letter-spacing: 0.14em;
+    text-transform: uppercase; color: var(--ink); white-space: nowrap;
+  }
+  .masthead .title.right {
+    text-align: right; color: var(--muted); font-weight: 700;
+    font-size: 10.5pt; letter-spacing: 0.12em;
+  }
+
+  .scoreline {
+    display: flex; align-items: center; justify-content: center;
+    gap: 4mm; white-space: nowrap;
+  }
+  .scoreline .team {
+    font-size: 12pt; font-weight: 700; color: var(--ink);
+    white-space: nowrap;
+  }
+  .scoreline .team.home { text-align: right; }
+  .scoreline .team.away { text-align: left; }
+  .scoreline img { height: 11mm; width: auto; object-fit: contain; }
+  .scoreline .score {
+    font-size: 21pt; font-weight: 800; letter-spacing: 0.03em;
+    padding: 0 2mm; color: var(--ink); font-variant-numeric: tabular-nums;
+  }
+  .scoreline .sub {
+    display: block; text-align: center; font-size: 7pt; color: var(--faint);
+    letter-spacing: 0.14em; text-transform: uppercase; margin-top: 1.5mm;
+    font-weight: 600;
+  }
+
+  /* -------------------------------------------------------------- main --- */
+  .main {
+    display: grid;
+    grid-template-columns: 1fr 1.28fr 1fr;
+    column-gap: 7mm;
+    align-items: start;
+  }
+
+  .panel-head {
+    font-size: 8pt; font-weight: 800; text-transform: uppercase;
+    letter-spacing: 0.12em; color: var(--ink);
+    padding-bottom: 1.2mm; margin: 0 0 2mm 0;
+    border-bottom: 1px solid var(--grid);
+    display: flex; justify-content: space-between; align-items: baseline;
+  }
+  .panel-head .sub { color: var(--faint); font-weight: 600; letter-spacing: 0.06em; font-size: 7pt; }
+
+  .pitch-wrap { text-align: center; }
+  .pitch-wrap.corner img { width: 100%; max-height: 36mm; }
+  .pitch-wrap.fk img { height: 43mm; width: auto; }
+
+  .legend {
+    display: flex; flex-wrap: wrap; justify-content: center;
+    gap: 0.8mm 3.5mm; margin: 1.4mm 0 2.6mm 0;
+    font-size: 6.6pt; color: var(--muted); letter-spacing: 0.02em;
+  }
+  .legend .item { display: inline-flex; align-items: center; gap: 1.2mm; }
+  .legend .dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+  .legend .note { width: 100%; text-align: center; font-style: italic; color: var(--faint); font-size: 6.2pt; margin-top: 0.4mm; }
+
+  /* ------------------------------------------------------- stat bars --- */
+  .stats { padding: 0; }
+  .stats-header {
+    display: grid;
+    grid-template-columns: 9mm 9mm 1fr 9mm 9mm;
+    align-items: center;
+    font-size: 6.2pt; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.08em; color: var(--faint);
+    padding-bottom: 1.4mm; margin-bottom: 1mm;
+    border-bottom: 1px solid var(--grid);
+  }
+  .stats-header .c { text-align: center; }
+  .stats-header .teams { display: flex; justify-content: space-between; padding: 0 1mm; font-size: 7.6pt; }
+  .stats-header .home-name { color: var(--home); font-weight: 800; letter-spacing: 0.04em; }
+  .stats-header .away-name { color: var(--away); font-weight: 800; letter-spacing: 0.04em; }
+
+  .section-head {
+    font-size: 7.4pt; font-weight: 800; text-transform: uppercase;
+    letter-spacing: 0.14em; color: var(--red-dark);
+    margin: 1.8mm 0 1mm 0; text-align: center;
+  }
+  .section-head:first-child { margin-top: 1mm; }
+
+  .bar-row {
+    display: grid;
+    grid-template-columns: 9mm 9mm 1fr 9mm 9mm;
+    align-items: center;
+    column-gap: 1.5mm;
+    margin-bottom: 0.9mm;
+  }
+  .bar-row .pct { font-size: 6.6pt; text-align: center; font-weight: 700; letter-spacing: 0.02em; }
+  .bar-row .per90 { font-size: 7.2pt; text-align: center; color: var(--muted); font-weight: 600; }
+  .pct.up { color: var(--green); }
+  .pct.down { color: var(--red); }
+  .pct.muted { color: var(--faint); }
+
+  .bar { min-width: 0; }
+  .bar-label {
+    font-size: 6.6pt; font-weight: 700; text-align: center; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.8mm;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .bar-track {
+    display: flex; height: 4.6mm; border-radius: 2.5mm; overflow: hidden;
+    background: var(--hair);
+  }
+  .bar-track .seg {
+    display: flex; align-items: center;
+    font-size: 7.2pt; font-weight: 800; color: #fff; min-width: 5mm;
+  }
+  .bar-track .seg.home { justify-content: flex-start; padding-left: 2.4mm; background: var(--home); border-radius: 2.5mm 0 0 2.5mm; }
+  .bar-track .seg.away { justify-content: flex-end; padding-right: 2.4mm; background: var(--away); border-radius: 0 2.5mm 2.5mm 0; }
+  .bar-track .seg.zero { color: var(--faint); }
+
+  /* ----------------------------------------------------- contact tables --- */
+  .tables {
+    display: grid; grid-template-columns: 1fr 1fr; column-gap: 9mm;
+    margin-top: 2.5mm; padding-top: 2.5mm; border-top: 2px solid var(--red);
+  }
+  .tables h4 {
+    font-size: 8.5pt; font-weight: 800; text-transform: uppercase;
+    letter-spacing: 0.12em; margin: 0 0 2mm 0; color: var(--ink);
+  }
+  table.fc { width: 100%; border-collapse: collapse; font-size: 7.6pt; }
+  table.fc th, table.fc td { padding: 1.0mm 1.5mm; text-align: center; }
+  table.fc thead tr.group th {
+    font-size: 6.6pt; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--home); font-weight: 800; padding-bottom: 0.4mm;
+  }
+  table.fc thead tr.group th.def { color: var(--away); }
+  table.fc thead tr.cols th {
+    font-size: 6.4pt; text-transform: uppercase; letter-spacing: 0.04em;
+    color: var(--faint); border-bottom: 1px solid var(--grid); font-weight: 700;
+  }
+  table.fc tbody td { border-bottom: 1px solid var(--hair); }
+  table.fc tbody tr:last-child td { border-bottom: none; }
+  table.fc .team-cell { text-align: left; font-weight: 700; white-space: nowrap; }
+  table.fc .home-row .team-cell { color: var(--home); }
+  table.fc .away-row .team-cell { color: var(--away); }
+  table.fc .win { font-weight: 800; color: var(--ink); }
+  table.fc .divider { border-left: 1px solid var(--grid); }
+
+  .footnote {
+    font-size: 6.2pt; color: var(--faint); margin-top: 1.2mm; line-height: 1.4;
+  }
+  </style>
+</head>
+<body>
+<div class="page">
+
+  <!-- ================================================== masthead ===== -->
+  <div class="masthead">
+    <div class="title">Set Play Analysis</div>
+    <div class="scorebox">
+      <div class="scoreline">
+        <span class="team home">{{ meta.home_team }}</span>
+        {% if meta.home_badge %}<img src="{{ meta.home_badge }}" alt="">{% endif %}
+        <span class="score">{{ meta.home_goals }}&nbsp;–&nbsp;{{ meta.away_goals }}</span>
+        {% if meta.away_badge %}<img src="{{ meta.away_badge }}" alt="">{% endif %}
+        <span class="team away">{{ meta.away_team }}</span>
+      </div>
+      <span class="sub">{{ meta.competition }} &nbsp;·&nbsp; {{ meta.season }} &nbsp;·&nbsp; {{ meta.date }}</span>
+    </div>
+    <div class="title right">{{ meta.competition }}</div>
+  </div>
+
+  <!-- ===================================================== main ====== -->
+  <div class="main">
+
+    <!-- LEFT TEAM PANEL -->
+    {% set p = panels.home %}
+    <section class="team-col">
+      <div class="panel-head"><span>Attacking Corners</span><span class="sub">{{ p.team }}</span></div>
+      <div class="pitch-wrap corner"><img src="{{ p.corner_img }}" alt=""></div>
+      <div class="legend">
+        {% for label, colour in corner_legend %}
+        <span class="item"><span class="dot" style="background: {{ colour }}"></span>{{ label }}</span>
+        {% endfor %}
+        <span class="note">Ringed landing spot = won first contact</span>
+      </div>
+      <div class="panel-head"><span>Free-Kick Overview</span><span class="sub">{{ p.team }}</span></div>
+      <div class="pitch-wrap fk"><img src="{{ p.fk_img }}" alt=""></div>
+      <div class="legend">
+        {% for label, colour in fk_legend %}
+        <span class="item"><span class="dot" style="background: {{ colour }}"></span>{{ label }}</span>
+        {% endfor %}
+      </div>
+    </section>
+
+    <!-- CENTER STAT BARS -->
+    <section class="stats">
+      <div class="stats-header">
+        <div class="c">% chg</div>
+        <div class="c">/90</div>
+        <div class="teams"><span class="home-name">{{ meta.home_team }}</span><span class="away-name">{{ meta.away_team }}</span></div>
+        <div class="c">/90</div>
+        <div class="c">% chg</div>
+      </div>
+      {% for row in stat_rows %}
+        {% if row.section %}<div class="section-head">{{ row.section }}</div>{% endif %}
+        <div class="bar-row">
+          <div class="pct {{ row.home_pct.color }}">{{ row.home_pct.text }}</div>
+          <div class="per90">{{ row.home_per90 }}</div>
+          <div class="bar">
+            <div class="bar-label">{{ row.label }}</div>
+            <div class="bar-track">
+              <div class="seg home {{ 'zero' if row.home_value == '0' }}" style="width: {{ row.home_width }}%">{{ row.home_value }}</div>
+              <div class="seg away {{ 'zero' if row.away_value == '0' }}" style="width: {{ row.away_width }}%">{{ row.away_value }}</div>
+            </div>
+          </div>
+          <div class="per90">{{ row.away_per90 }}</div>
+          <div class="pct {{ row.away_pct.color }}">{{ row.away_pct.text }}</div>
+        </div>
+      {% endfor %}
+    </section>
+
+    <!-- RIGHT TEAM PANEL -->
+    {% set p = panels.away %}
+    <section class="team-col">
+      <div class="panel-head"><span>Attacking Corners</span><span class="sub">{{ p.team }}</span></div>
+      <div class="pitch-wrap corner"><img src="{{ p.corner_img }}" alt=""></div>
+      <div class="legend">
+        {% for label, colour in corner_legend %}
+        <span class="item"><span class="dot" style="background: {{ colour }}"></span>{{ label }}</span>
+        {% endfor %}
+        <span class="note">Ringed landing spot = won first contact</span>
+      </div>
+      <div class="panel-head"><span>Free-Kick Overview</span><span class="sub">{{ p.team }}</span></div>
+      <div class="pitch-wrap fk"><img src="{{ p.fk_img }}" alt=""></div>
+      <div class="legend">
+        {% for label, colour in fk_legend %}
+        <span class="item"><span class="dot" style="background: {{ colour }}"></span>{{ label }}</span>
+        {% endfor %}
+      </div>
+    </section>
+  </div>
+
+  <!-- ============================================ first-contact tables == -->
+  <div class="tables">
+    <div>
+      <h4>Corner First Contacts</h4>
+      <table class="fc">
+        <thead>
+          <tr class="group">
+            <th></th>
+            <th colspan="4">Attacking</th>
+            <th colspan="4" class="def divider">Defending</th>
+          </tr>
+          <tr class="cols">
+            <th class="team-cell">Team</th>
+            <th>Taken</th><th>Won</th><th>Lost</th><th>Win%</th>
+            <th class="divider">Faced</th><th>Won</th><th>Lost</th><th>Win%</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in contact.corners %}
+          <tr class="{{ 'home-row' if loop.first else 'away-row' }}">
+            <td class="team-cell">{{ r.team }}</td>
+            <td>{{ r.attacking.n }}</td><td>{{ r.attacking.won }}</td><td>{{ r.attacking.lost }}</td><td class="win">{{ r.attacking.win_rate }}</td>
+            <td class="divider">{{ r.defending.n }}</td><td>{{ r.defending.won }}</td><td>{{ r.defending.lost }}</td><td class="win">{{ r.defending.win_rate }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div>
+      <h4>Free-Kick First Contacts</h4>
+      <table class="fc">
+        <thead>
+          <tr class="group">
+            <th></th>
+            <th colspan="4">Attacking</th>
+            <th colspan="4" class="def divider">Defending</th>
+          </tr>
+          <tr class="cols">
+            <th class="team-cell">Team</th>
+            <th>Taken</th><th>Won</th><th>Lost</th><th>Win%</th>
+            <th class="divider">Faced</th><th>Won</th><th>Lost</th><th>Win%</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in contact.free_kicks %}
+          <tr class="{{ 'home-row' if loop.first else 'away-row' }}">
+            <td class="team-cell">{{ r.team }}</td>
+            <td>{{ r.attacking.n }}</td><td>{{ r.attacking.won }}</td><td>{{ r.attacking.lost }}</td><td class="win">{{ r.attacking.win_rate }}</td>
+            <td class="divider">{{ r.defending.n }}</td><td>{{ r.defending.won }}</td><td>{{ r.defending.lost }}</td><td class="win">{{ r.defending.win_rate }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="footnote">
+    First contact from IMPECT set-piece sub-phase data (uncontested / short deliveries excluded from Win%) · corner type = IMPECT delivery zone · indirect free-kicks are played in, not shot · "/90" = each team's own 2025/26 regular-season rate, "% chg" = this match vs that baseline.
+  </div>
+
+</div>
+</body>
+</html>
