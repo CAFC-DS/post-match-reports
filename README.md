@@ -13,9 +13,9 @@ Worked example (default): **Swansea City 3–1 Charlton Athletic, 2 May 2026
 | Region | Content |
 | --- | --- |
 | Masthead | Crests, single-line scoreline, competition / season / date |
-| Left & right panels | Each team's **attacking corners** (delivery arrows coloured by IMPECT corner type — near post / central / far post / short — over a soft danger-zone heatmap; landing spot ringed when the team won first contact) and **free-kick overview** (delivery map over a threat heatmap). Left = home, right = away. |
+| Left & right panels | Each team's **attacking corners** and **free kicks** (delivery maps over a threat heatmap). Left = home, right = away. Corner graphic has two styles (see `--corner-style`): *hybrid* (delivery arrows coloured by IMPECT corner type over a danger-zone heatmap) or *zones* (a 6-cell target-zone grid shaded/labelled by deliveries landed). |
 | Centre | Split **stat bars** — corners, throw-ins and indirect free-kicks (total + shots / goals / xG created). Each row shows the match value for both teams plus their **season /90** rate and the **% change** vs that rate |
-| Lower band | Each team's **shots from set-pieces** (mini pitch, dot size = xG, goals in red) flanking **corner** and **free-kick first-contact** tables — attacking & defending, won / lost / win% — for both teams |
+| Lower band | **Corner** and **free-kick first-contact** tables — attacking & defending, taken/faced, won / lost / win% — for both teams |
 
 ## Connections
 
@@ -52,6 +52,10 @@ python set_piece_report/run.py --match-id 206675
 python set_piece_report/run.py --html-only
 python set_piece_report/run.py --pdf-only
 python set_piece_report/run.py --refresh
+
+# corner graphic style: hybrid (default), zones, or both files for comparison
+python set_piece_report/run.py --corner-style zones
+python set_piece_report/run.py --corner-style both
 ```
 
 Output lands in `outputs/set_piece_report/`. The script pins its own working

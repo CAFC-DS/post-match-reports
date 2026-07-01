@@ -92,13 +92,12 @@
     letter-spacing: 0.12em; color: var(--ink);
     padding-bottom: 1.2mm; margin: 0 0 2mm 0;
     border-bottom: 1px solid var(--grid);
-    display: flex; justify-content: space-between; align-items: baseline;
+    text-align: center;
   }
-  .panel-head .sub { color: var(--faint); font-weight: 600; letter-spacing: 0.06em; font-size: 7pt; }
 
   .pitch-wrap { text-align: center; }
-  .pitch-wrap.corner img { width: 100%; max-height: 34mm; }
-  .pitch-wrap.fk img { height: 40mm; width: auto; }
+  .pitch-wrap.corner img { width: 100%; max-height: 35mm; }
+  .pitch-wrap.fk img { height: 56mm; width: auto; }
 
   .legend {
     display: flex; flex-wrap: wrap; justify-content: center;
@@ -161,19 +160,14 @@
   .bar-track .seg.away { justify-content: flex-end; padding-right: 2.4mm; background: var(--away); border-radius: 0 2.5mm 2.5mm 0; }
   .bar-track .seg.zero { color: var(--faint); }
 
-  /* -------------------------------------------- lower band (maps + tables) --- */
-  .lower {
-    display: grid; grid-template-columns: 1fr 1.62fr 1fr; column-gap: 7mm;
-    align-items: start;
-    margin-top: 1.6mm; padding-top: 1.8mm; border-top: 2px solid var(--red);
+  /* ----------------------------------------------------- contact tables --- */
+  .tables {
+    display: grid; grid-template-columns: 1fr 1fr; column-gap: 9mm;
+    margin-top: 3mm; padding-top: 3mm; border-top: 2px solid var(--red);
   }
-  .shots { text-align: center; }
-  .shots .panel-head { justify-content: flex-start; }
-  .shots img { width: 100%; max-height: 33mm; }
-  .tables { display: flex; flex-direction: column; gap: 2.4mm; }
   .tables h4 {
-    font-size: 8pt; font-weight: 800; text-transform: uppercase;
-    letter-spacing: 0.12em; margin: 0 0 1.4mm 0; color: var(--ink);
+    font-size: 8.5pt; font-weight: 800; text-transform: uppercase;
+    letter-spacing: 0.12em; margin: 0 0 2mm 0; color: var(--ink);
   }
   table.fc { width: 100%; border-collapse: collapse; font-size: 7.4pt; }
   table.fc th, table.fc td { padding: 0.8mm 1.5mm; text-align: center; }
@@ -230,9 +224,9 @@
         {% for label, colour in corner_legend %}
         <span class="item"><span class="dot" style="background: {{ colour }}"></span>{{ label }}</span>
         {% endfor %}
-        <span class="note">Ringed landing spot = won first contact</span>
+        <span class="note">{{ corner_note }}</span>
       </div>
-      <div class="panel-head">Free-Kick Overview</div>
+      <div class="panel-head">Free Kicks</div>
       <div class="pitch-wrap fk"><img src="{{ p.fk_img }}" alt=""></div>
       <div class="legend">
         {% for label, colour in fk_legend %}
@@ -246,7 +240,7 @@
       <div class="stats-header">
         <div class="c">% chg</div>
         <div class="c">/90</div>
-        <div class="c mid">This match</div>
+        <div class="c mid"></div>
         <div class="c">/90</div>
         <div class="c">% chg</div>
       </div>
@@ -277,9 +271,9 @@
         {% for label, colour in corner_legend %}
         <span class="item"><span class="dot" style="background: {{ colour }}"></span>{{ label }}</span>
         {% endfor %}
-        <span class="note">Ringed landing spot = won first contact</span>
+        <span class="note">{{ corner_note }}</span>
       </div>
-      <div class="panel-head">Free-Kick Overview</div>
+      <div class="panel-head">Free Kicks</div>
       <div class="pitch-wrap fk"><img src="{{ p.fk_img }}" alt=""></div>
       <div class="legend">
         {% for label, colour in fk_legend %}
@@ -289,85 +283,59 @@
     </section>
   </div>
 
-  <!-- ================================ shot maps + first-contact tables == -->
-  <div class="lower">
-
-    <!-- HOME set-piece shots -->
-    <div class="shots">
-      <div class="panel-head">Shots From Set-Pieces</div>
-      <img src="{{ panels.home.shot_img }}" alt="">
-      <div class="legend">
-        {% for label, colour in shot_legend %}
-        <span class="item"><span class="dot" style="background: {{ colour }}"></span>{{ label }}</span>
-        {% endfor %}
-      </div>
+  <!-- ============================================ first-contact tables == -->
+  <div class="tables">
+    <div>
+      <h4>Corner First Contacts</h4>
+      <table class="fc">
+        <thead>
+          <tr class="group">
+            <th></th>
+            <th colspan="4">Attacking</th>
+            <th colspan="4" class="def divider">Defending</th>
+          </tr>
+          <tr class="cols">
+            <th class="team-cell">Team</th>
+            <th>Taken</th><th>Won</th><th>Lost</th><th>Win%</th>
+            <th class="divider">Faced</th><th>Won</th><th>Lost</th><th>Win%</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in contact.corners %}
+          <tr class="{{ 'home-row' if loop.first else 'away-row' }}">
+            <td class="team-cell">{{ r.team }}</td>
+            <td>{{ r.attacking.n }}</td><td>{{ r.attacking.won }}</td><td>{{ r.attacking.lost }}</td><td class="win">{{ r.attacking.win_rate }}</td>
+            <td class="divider">{{ r.defending.n }}</td><td>{{ r.defending.won }}</td><td>{{ r.defending.lost }}</td><td class="win">{{ r.defending.win_rate }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
     </div>
-
-    <!-- FIRST-CONTACT TABLES -->
-    <div class="tables">
-      <div>
-        <h4>Corner First Contacts</h4>
-        <table class="fc">
-          <thead>
-            <tr class="group">
-              <th></th>
-              <th colspan="4">Attacking</th>
-              <th colspan="4" class="def divider">Defending</th>
-            </tr>
-            <tr class="cols">
-              <th class="team-cell">Team</th>
-              <th>Taken</th><th>Won</th><th>Lost</th><th>Win%</th>
-              <th class="divider">Faced</th><th>Won</th><th>Lost</th><th>Win%</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for r in contact.corners %}
-            <tr class="{{ 'home-row' if loop.first else 'away-row' }}">
-              <td class="team-cell">{{ r.team }}</td>
-              <td>{{ r.attacking.n }}</td><td>{{ r.attacking.won }}</td><td>{{ r.attacking.lost }}</td><td class="win">{{ r.attacking.win_rate }}</td>
-              <td class="divider">{{ r.defending.n }}</td><td>{{ r.defending.won }}</td><td>{{ r.defending.lost }}</td><td class="win">{{ r.defending.win_rate }}</td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-      <div>
-        <h4>Free-Kick First Contacts</h4>
-        <table class="fc">
-          <thead>
-            <tr class="group">
-              <th></th>
-              <th colspan="4">Attacking</th>
-              <th colspan="4" class="def divider">Defending</th>
-            </tr>
-            <tr class="cols">
-              <th class="team-cell">Team</th>
-              <th>Taken</th><th>Won</th><th>Lost</th><th>Win%</th>
-              <th class="divider">Faced</th><th>Won</th><th>Lost</th><th>Win%</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for r in contact.free_kicks %}
-            <tr class="{{ 'home-row' if loop.first else 'away-row' }}">
-              <td class="team-cell">{{ r.team }}</td>
-              <td>{{ r.attacking.n }}</td><td>{{ r.attacking.won }}</td><td>{{ r.attacking.lost }}</td><td class="win">{{ r.attacking.win_rate }}</td>
-              <td class="divider">{{ r.defending.n }}</td><td>{{ r.defending.won }}</td><td>{{ r.defending.lost }}</td><td class="win">{{ r.defending.win_rate }}</td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-    </div>
-
-    <!-- AWAY set-piece shots -->
-    <div class="shots">
-      <div class="panel-head">Shots From Set-Pieces</div>
-      <img src="{{ panels.away.shot_img }}" alt="">
-      <div class="legend">
-        {% for label, colour in shot_legend %}
-        <span class="item"><span class="dot" style="background: {{ colour }}"></span>{{ label }}</span>
-        {% endfor %}
-      </div>
+    <div>
+      <h4>Free-Kick First Contacts</h4>
+      <table class="fc">
+        <thead>
+          <tr class="group">
+            <th></th>
+            <th colspan="4">Attacking</th>
+            <th colspan="4" class="def divider">Defending</th>
+          </tr>
+          <tr class="cols">
+            <th class="team-cell">Team</th>
+            <th>Taken</th><th>Won</th><th>Lost</th><th>Win%</th>
+            <th class="divider">Faced</th><th>Won</th><th>Lost</th><th>Win%</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in contact.free_kicks %}
+          <tr class="{{ 'home-row' if loop.first else 'away-row' }}">
+            <td class="team-cell">{{ r.team }}</td>
+            <td>{{ r.attacking.n }}</td><td>{{ r.attacking.won }}</td><td>{{ r.attacking.lost }}</td><td class="win">{{ r.attacking.win_rate }}</td>
+            <td class="divider">{{ r.defending.n }}</td><td>{{ r.defending.won }}</td><td>{{ r.defending.lost }}</td><td class="win">{{ r.defending.win_rate }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
     </div>
   </div>
 

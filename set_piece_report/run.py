@@ -41,6 +41,10 @@ def main() -> None:
     parser.add_argument("--html-only", action="store_true", help="Generate HTML only")
     parser.add_argument("--pdf-only", action="store_true", help="Generate PDF only")
     parser.add_argument("--refresh", action="store_true", help="Force a fresh pull from Snowflake instead of the parquet cache")
+    parser.add_argument(
+        "--corner-style", choices=["hybrid", "zones", "both"], default="hybrid",
+        help="Attacking-corner graphic: arrows over danger zones (hybrid), a target-zone grid (zones), or both files (both)",
+    )
     args = parser.parse_args()
 
     if args.pdf_only:
@@ -50,24 +54,28 @@ def main() -> None:
     else:
         formats = ("html", "pdf")
 
+    styles = ["hybrid", "zones"] if args.corner_style == "both" else [args.corner_style]
+
     print("=" * 64)
     print("Single-match Set-Piece Report")
     print("=" * 64)
     print(f"  matchId : {args.match_id}")
     print(f"  formats : {', '.join(formats)}")
+    print(f"  corners : {', '.join(styles)}")
     print(f"  source  : {'Snowflake (refresh)' if args.refresh else 'cached parquet (data/processed)'}")
     print()
 
-    outputs = build_report(
-        args.match_id,
-        output_dir=args.output_dir,
-        formats=formats,
-        refresh=args.refresh,
-    )
-
     print("Done. Output files:")
-    for fmt, path in outputs.items():
-        print(f"  • {fmt.upper()}: {path}")
+    for style in styles:
+        outputs = build_report(
+            args.match_id,
+            output_dir=args.output_dir,
+            formats=formats,
+            refresh=args.refresh,
+            corner_style=style,
+        )
+        for fmt, path in outputs.items():
+            print(f"  • [{style}] {fmt.upper()}: {path}")
 
 
 if __name__ == "__main__":

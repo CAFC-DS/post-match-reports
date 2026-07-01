@@ -29,6 +29,7 @@ from mplsoccer import VerticalPitch  # noqa: E402
 from set_piece_report.config import (
     CORNER_TYPE_COLORS,
     FK_TYPE_COLORS,
+    INK,
     MUTED,
     PITCH_LINE,
     PITCH_SURFACE,
@@ -126,6 +127,41 @@ def corner_overview(deliveries: pd.DataFrame) -> str:
             _PITCH_WID / 2, _PITCH_LEN - 16, "No attacking corners",
             ha="center", va="center", color=MUTED, fontsize=9,
         )
+    return _fig_to_uri(fig)
+
+
+# Zone grid over the penalty area (length = depth from goal, width thirds).
+_ZONE_X = np.array([88.5, 99.5, 105.0])                 # deep box, then 6-yard
+_ZONE_Y = np.array([13.85, 27.28, 40.72, 54.15])        # left / central / right
+
+
+def corner_zone_overview(deliveries: pd.DataFrame) -> str:
+    """Attacking corner *target zones*: a 6-cell box grid shaded and labelled by
+    how many deliveries landed in each zone."""
+    pitch, fig, ax = _pitch(half=True, pad_bottom=-20.5, figsize=(5.2, 3.2))
+
+    ex = ey = None
+    if deliveries is not None and not deliveries.empty:
+        ex, ey = _to_pitch(deliveries["endAdjCoordinatesX"], deliveries["endAdjCoordinatesY"])
+        valid = ex.notna() & ey.notna()
+        ex, ey = ex[valid], ey[valid]
+
+    if ex is not None and len(ex):
+        stat = pitch.bin_statistic(ex, ey, statistic="count", bins=(_ZONE_X, _ZONE_Y))
+        grid = np.array(stat["statistic"], dtype=float)
+        shaded = grid.copy()
+        shaded[shaded == 0] = np.nan          # empty zones stay pitch-coloured
+        stat["statistic"] = shaded
+        pitch.heatmap(stat, ax=ax, cmap=_danger_cmap(), alpha=0.62,
+                      edgecolors=PITCH_SURFACE, lw=1.2, zorder=1)
+        labels = stat.copy()
+        labels["statistic"] = grid            # keep zeros; exclude_zeros hides them
+        pitch.label_heatmap(labels, ax=ax, str_format="{:.0f}", color=INK,
+                            fontsize=11, fontweight="bold", zorder=3,
+                            ha="center", va="center", exclude_zeros=True)
+    else:
+        ax.text(_PITCH_WID / 2, _PITCH_LEN - 16, "No attacking corners",
+                ha="center", va="center", color=MUTED, fontsize=9)
     return _fig_to_uri(fig)
 
 

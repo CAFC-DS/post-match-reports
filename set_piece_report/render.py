@@ -27,7 +27,6 @@ from set_piece_report.metrics import (  # noqa: E402
     build_report_data,
     corner_deliveries,
     fk_deliveries,
-    set_piece_shots,
 )
 
 TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
@@ -133,19 +132,27 @@ def build_report(
     output_dir: Path | str = DEFAULT_OUTPUT_DIR,
     formats: tuple[str, ...] = ("html", "pdf"),
     refresh: bool = False,
+    corner_style: str = "hybrid",
 ) -> dict[str, Path]:
-    """Build the set-piece report for ``match_id`` and return output paths."""
+    """Build the set-piece report for ``match_id`` and return output paths.
+
+    ``corner_style`` selects the attacking-corner graphic:
+    ``"hybrid"`` (delivery arrows over a danger-zone heatmap) or ``"zones"``
+    (a 6-cell target-zone grid shaded/labelled by deliveries).
+    """
     ctx = load_match_context(match_id, refresh=refresh)
     report_data = build_report_data(ctx)
+
+    zonal = corner_style == "zones"
+    corner_fn = pitch.corner_zone_overview if zonal else pitch.corner_overview
 
     panels = {}
     for side, team in (("home", ctx.home_team), ("away", ctx.away_team)):
         panels[side] = {
             "team": team,
             "badge": _badge_uri(team),
-            "corner_img": pitch.corner_overview(corner_deliveries(ctx, team)),
+            "corner_img": corner_fn(corner_deliveries(ctx, team)),
             "fk_img": pitch.free_kick_overview(fk_deliveries(ctx, team)),
-            "shot_img": pitch.set_piece_shot_map(set_piece_shots(ctx, team)),
             "corner_type_counts": report_data.corner_type_counts.get(team, {}),
         }
 
@@ -166,9 +173,12 @@ def build_report(
         "away_bar": AWAY_BAR,
         "panels": panels,
         "stat_rows": _stat_rows_context(report_data),
-        "corner_legend": pitch.corner_legend_items(),
+        "corner_legend": [] if zonal else pitch.corner_legend_items(),
+        "corner_note": (
+            "Shade & number = deliveries landed in each zone"
+            if zonal else "Ringed landing spot = won first contact"
+        ),
         "fk_legend": pitch.fk_legend_items(),
-        "shot_legend": pitch.shot_legend_items(),
         "contact": _contact_table_context(report_data, ctx.home_team, ctx.away_team),
         "colors": {"up": GREEN, "down": RED},
     }
@@ -183,8 +193,9 @@ def build_report(
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    suffix = "_corner_zones" if zonal else ""
     slug = (
-        f"{ctx.home_team}_{ctx.away_team}_{ctx.date.strftime('%Y_%m_%d')}_set_piece_report"
+        f"{ctx.home_team}_{ctx.away_team}_{ctx.date.strftime('%Y_%m_%d')}_set_piece_report{suffix}"
     ).replace(" ", "_")
 
     outputs: dict[str, Path] = {}
