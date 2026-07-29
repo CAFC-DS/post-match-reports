@@ -1,6 +1,7 @@
 from unittest.mock import patch
 
 import pandas as pd
+import pytest
 
 from src.report import metrics_combined
 
@@ -63,3 +64,48 @@ def test_combined_team_stats_overrides_possession_with_dvms_tracked_value():
     # Verify no phantom rows were created (index should be exactly these two teams).
     assert len(combined) == 2
     assert list(combined.index) == ["Charlton Athletic", "Swansea City"]
+
+
+class _FakeDvmsMatchForBreaks:
+    def __init__(self):
+        self.events = pd.DataFrame()   # unused: line_breaking_passes is mocked below
+        self.frames = pd.DataFrame()
+        self.meta = object()
+
+    def team_id_of(self, side: str) -> str:
+        return {"home": "H1", "away": "A1"}[side]
+
+    class _F7:
+        lineups = pd.DataFrame()
+
+    f7 = _F7()
+
+
+def test_line_break_style_split_percentages():
+    match = _FakeDvmsMatchForBreaks()
+    breaks = pd.DataFrame([
+        {"event_id": 1, "style": "through"},
+        {"event_id": 1, "style": "over"},   # same pass breaking a 2nd line — dedup keeps first row
+        {"event_id": 2, "style": "over"},
+        {"event_id": 4, "style": "through"},
+    ])
+
+    with patch.object(metrics_combined, "line_breaking_passes", return_value=breaks) as mocked:
+        result = metrics_combined.line_break_style_split(match, "home")
+
+    mocked.assert_called_once_with(
+        events=match.events, tracking=match.frames, pitch_meta=match.meta,
+        lineups=match.f7.lineups, team_id="H1", opponent_team_id="A1",
+        opponent_is_home=False,
+    )
+    assert result["n"] == 3  # 4 event_ids, deduped to 3 unique
+    assert result["through"] == pytest.approx(2 / 3 * 100)
+    assert result["over"] == pytest.approx(1 / 3 * 100)
+    assert result["around"] == pytest.approx(0.0)
+
+
+def test_line_break_style_split_handles_no_breaks():
+    match = _FakeDvmsMatchForBreaks()
+    with patch.object(metrics_combined, "line_breaking_passes", return_value=pd.DataFrame()):
+        result = metrics_combined.line_break_style_split(match, "away")
+    assert result == {"through": 0.0, "over": 0.0, "around": 0.0, "n": 0}
