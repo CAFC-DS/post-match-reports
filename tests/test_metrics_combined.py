@@ -109,3 +109,43 @@ def test_line_break_style_split_handles_no_breaks():
     with patch.object(metrics_combined, "line_breaking_passes", return_value=pd.DataFrame()):
         result = metrics_combined.line_break_style_split(match, "away")
     assert result == {"through": 0.0, "over": 0.0, "around": 0.0, "n": 0}
+
+
+def test_blended_player_contributions_ranks_by_composite_and_keeps_impect_columns():
+    impect_df = pd.DataFrame([
+        {"playerName": "Alfie May", "squadName": "Charlton Athletic", "surname": "May",
+         "passes": 20, "ground": 2, "aerial": 5, "ball_wins": 1, "shots": 3, "xg": 0.9, "xt": 0.30},
+        {"playerName": "Terrell Egbri", "squadName": "Charlton Athletic", "surname": "Egbri",
+         "passes": 60, "ground": 4, "aerial": 0, "ball_wins": 3, "shots": 0, "xg": 0.0, "xt": 0.05},
+    ])
+    dvms_df = pd.DataFrame([
+        {"name": "May", "distance": 9500.0, "top_speed": 31.2},
+        {"name": "Egbri", "distance": 11200.0, "top_speed": 28.4},
+    ])
+
+    with patch.object(metrics_combined.impect_metrics, "player_contributions", return_value=impect_df), \
+         patch.object(metrics_combined.metrics_dvms, "player_contributions_dvms", return_value=dvms_df):
+        result = metrics_combined.blended_player_contributions(pd.DataFrame(), object(), top_n=10)
+
+    assert list(result.columns[:9]) == [
+        "playerName", "squadName", "surname", "passes", "ground", "aerial", "ball_wins", "shots", "xg",
+    ] or set(["playerName", "squadName", "surname", "passes", "ground", "aerial", "ball_wins", "shots", "xg", "xt", "composite"]) <= set(result.columns)
+    assert "composite" in result.columns
+    assert len(result) == 2
+    # composite is descending
+    assert result.iloc[0]["composite"] >= result.iloc[1]["composite"]
+
+
+def test_blended_player_contributions_handles_unmatched_dvms_player():
+    impect_df = pd.DataFrame([
+        {"playerName": "Alfie May", "squadName": "Charlton Athletic", "surname": "May",
+         "passes": 20, "ground": 2, "aerial": 5, "ball_wins": 1, "shots": 3, "xg": 0.9, "xt": 0.30},
+    ])
+    dvms_df = pd.DataFrame(columns=["name", "distance", "top_speed"])  # no physical match at all
+
+    with patch.object(metrics_combined.impect_metrics, "player_contributions", return_value=impect_df), \
+         patch.object(metrics_combined.metrics_dvms, "player_contributions_dvms", return_value=dvms_df):
+        result = metrics_combined.blended_player_contributions(pd.DataFrame(), object(), top_n=10)
+
+    assert len(result) == 1
+    assert result.iloc[0]["composite"] == 0.0  # only component with any signal (xt) has zero std across n=1
