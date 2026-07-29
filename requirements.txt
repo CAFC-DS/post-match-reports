@@ -1,0 +1,11 @@
+pandas>=2.2
+numpy>=1.26
+snowflake-connector-python>=3.10
+cryptography>=42.0
+python-dotenv>=1.0
+PyYAML>=6.0
+jinja2>=3.1
+weasyprint>=62.0
+matplotlib>=3.8
+mplsoccer>=1.2.4
+pytest>=8.0

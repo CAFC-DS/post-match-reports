@@ -1,0 +1,13 @@
+project:
+  team_name: Charlton Athletic
+  competition_name: Championship
+  season: "25/26"
+  local_cache_enabled: true
+  local_cache_format: parquet
+
+impect_events:
+  active: true
+  required: true
+  database: ${SNOWFLAKE_DATABASE}
+  schema: ${SNOWFLAKE_SCHEMA}
+  table: IMPECT_EVENTS_STAGING
