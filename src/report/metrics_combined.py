@@ -26,7 +26,6 @@ def combined_team_stats(impect_events: pd.DataFrame, dvms_match) -> pd.DataFrame
     home, away = meta.home_team, meta.away_team
     stats = impect_metrics.team_stats(impect_events, home, away).copy()
 
-    for side in ("home", "away"):
-        team = dvms_match.team_name_of(side)
+    for side, team in (("home", home), ("away", away)):
         stats.loc[team, "possession_pct"] = metrics_dvms.team_stat_values(dvms_match, side)["possession_pct"]
     return stats

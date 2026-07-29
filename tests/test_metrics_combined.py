@@ -60,3 +60,6 @@ def test_combined_team_stats_overrides_possession_with_dvms_tracked_value():
     # Every other Impect-sourced column is untouched.
     assert combined.loc["Charlton Athletic", "successful_passes"] == 40
     assert combined.loc["Swansea City", "won_aerial_duels"] == 3
+    # Verify no phantom rows were created (index should be exactly these two teams).
+    assert len(combined) == 2
+    assert list(combined.index) == ["Charlton Athletic", "Swansea City"]
