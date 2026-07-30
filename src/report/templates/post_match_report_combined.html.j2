@@ -250,9 +250,9 @@ body { font-family: var(--sans); color: var(--ink); background: #2b2a27; }
   <!-- --------------------------------------- MOMENTUM + WHERE CHANCES CAME FROM -->
   <div class="row" style="flex: 1 1 48mm; min-height: 43mm;">
     <div class="panel">
-      <div class="panel-label"><span class="mark"></span>Momentum</div>
-      <div class="chartbox"><img src="{{ momentum_img }}" alt=""></div>
-      <div class="note">Above the line = {{ meta.charlton_team }}, below = {{ meta.opponent_team }} &middot; circles = goals, triangles = subs, dotted lead = wave value &middot; square-root scale keeps quiet spells visible</div>
+      <div class="panel-label"><span class="mark"></span>Territory (tracked)</div>
+      <div class="chartbox"><img src="{{ territory_img }}" alt=""></div>
+      <div class="note">Above the line = {{ meta.charlton_team }}, below = {{ meta.opponent_team }} &middot; rolling mean tracked ball position, in metres &middot; circles = goals &middot; from Second Spectrum tracking (via DVMS)</div>
     </div>
     <div class="panel" style="flex: 0 0 54mm;">
       <div class="panel-label"><span class="mark"></span>Where the chances came from</div>
@@ -273,7 +273,7 @@ body { font-family: var(--sans); color: var(--ink); background: #2b2a27; }
         {% endfor %}
       </div>
       <div class="key">
-        <span>Both attacking upfield &middot; dashed line marks average defensive line height &middot; based on each player's own touches during settled possession, not tracking data</span>
+        <span>Both attacking upfield &middot; dashed line marks average defensive line height &middot; from Second Spectrum tracking (in possession), via DVMS</span>
       </div>
     </div>
   </div>
@@ -298,6 +298,11 @@ body { font-family: var(--sans); color: var(--ink); background: #2b2a27; }
         <span>{{ sw_lines() }}Thickness = <b>threat gained</b></span>
         <span class="sep">|</span>
         <span>Attacking left to right</span>
+      </div>
+      <div class="note">
+        {% for s in sides %}
+        {{ s.team }} line-breaking passes (Opta/Second Spectrum tracking): <b>{{ '%.0f'|format(s.entries_style_split.through) }}%</b> through &middot; <b>{{ '%.0f'|format(s.entries_style_split.over) }}%</b> over &middot; <b>{{ '%.0f'|format(s.entries_style_split.around) }}%</b> around ({{ s.entries_style_split.n }} passes){% if not loop.last %} &middot; {% endif %}
+        {% endfor %}
       </div>
     </div>
 
@@ -332,7 +337,7 @@ body { font-family: var(--sans); color: var(--ink); background: #2b2a27; }
   </div>
 
   <div class="footer">
-    <span>Data: IMPECT (via CAFC_TEST_ANALYSIS), single-match sample</span>
+    <span>Data: IMPECT (via CAFC_TEST_ANALYSIS) + Opta/Second Spectrum (via DVMS)</span>
     <span><b>{{ meta.home_team }} v {{ meta.away_team }}</b>, {{ meta.date }}</span>
     <span>Generated {{ generated_date }}</span>
   </div>
