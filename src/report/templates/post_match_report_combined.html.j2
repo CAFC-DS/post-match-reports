@@ -1,0 +1,342 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<title>{{ meta.home_team }} v {{ meta.away_team }} — Post-match report</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,400;0,500;0,600&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root {
+  --paper: #f3eee1;
+  --paper-2: #efe8d8;
+  --ink: #1a1a18;
+  --muted: #6f6a5d;
+  --faint: #918b7c;
+  --hair: #cfc7b4;
+  --hair-soft: #ded6c4;
+  --red: #d01012;
+  --grey: #7d7869;
+  --olive: #5c7a4a;
+  --failred: #a8685f;
+  --serif-text: 'Spectral', 'Iowan Old Style', Georgia, serif;
+  --sans: 'Plus Jakarta Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+body { font-family: var(--sans); color: var(--ink); background: #2b2a27; }
+@page { size: A4; margin: 0; }
+@media print { body { background: #fff; } .page { margin: 0 !important; box-shadow: none !important; } }
+
+.page {
+  width: 210mm; height: 297mm; background: var(--paper);
+  padding: 5mm 8mm 4mm; overflow: hidden;
+  display: flex; flex-direction: column; gap: 2.5mm;
+}
+@media screen { .page { margin: 8mm auto; box-shadow: 0 6px 30px rgba(0,0,0,0.45); } }
+
+/* --------------------------------------------------------------------- HEADER
+   Home team first, away second, the way a scoreline is written. Colour tracks
+   the club, not the venue: Charlton Athletic red, opponent grey, everywhere. */
+.header {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 2.4mm;
+  border-bottom: 1.2px solid var(--ink); padding-bottom: 1.6mm;
+}
+.header img { height: 9mm; width: auto; display: block; flex: 0 0 auto; }
+.header .score { font-size: 13.5px; font-weight: 800; white-space: nowrap; }
+.header .scorers { font-size: 8px; line-height: 1.4; min-width: 0; }
+.header .scorers .min { color: var(--muted); font-weight: 500; }
+.header .spacer { flex: 1 1 auto; }
+.cha { color: var(--red); }
+.opp { color: var(--grey); }
+.dash { color: var(--faint); }
+
+.season { flex: 0 0 auto; text-align: right; }
+.season .context { font-size: 7.4px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.07em; font-weight: 600; white-space: nowrap; }
+.season .form { display: flex; gap: 1mm; justify-content: flex-end; align-items: center; margin-top: 1.2mm; }
+.season .form .lbl { font-size: 6.6px; color: var(--faint); text-transform: uppercase; letter-spacing: 0.08em; font-weight: 700; margin-right: 0.4mm; }
+.season .form i {
+  width: 3.6mm; height: 3.6mm; border-radius: 50%; display: flex; align-items: center;
+  justify-content: center; font-size: 6.4px; font-weight: 800; font-style: normal; color: #fff;
+  line-height: 1;
+}
+.season .form i.W { background: var(--olive); }
+.season .form i.D { background: var(--faint); }
+.season .form i.L { background: var(--failred); }
+.season .form i.latest { outline: 0.9px solid var(--ink); outline-offset: 0.5px; }
+
+/* -------------------------------------------------------------------- PANELS */
+.row { display: flex; gap: 3mm; min-height: 0; }
+.panel {
+  flex: 1 1 0; min-width: 0; min-height: 0; display: flex; flex-direction: column;
+  overflow: hidden; border: 0.6px solid var(--hair); padding: 1.6mm 2.2mm 1.4mm;
+}
+/* align-items: center, not baseline. The marker is an empty box with no text in
+   it, so a baseline is something it does not really have, and WeasyPrint floated
+   it off the cap-height of the title next to it. */
+.panel-label {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 1.5mm; font-size: 7.2px;
+  font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase; color: var(--ink);
+  margin-bottom: 1.2mm; line-height: 1;
+}
+.panel-label .mark { width: 4.4px; height: 4.4px; background: var(--red); flex: 0 0 auto; }
+.panel-body { flex: 1 1 auto; min-height: 0; display: flex; gap: 2.4mm; }
+.half { flex: 1 1 0; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.half .cap { flex: 0 0 auto; text-align: center; font-size: 7.4px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.8mm; }
+.chartbox { flex: 1 1 auto; min-height: 0; }
+.chartbox img { width: 100%; height: 100%; object-fit: contain; display: block; }
+
+/* ---------------------------------------------------------------- IN-PANEL KEY
+   Every swatch is inline SVG. They used to be CSS boxes with border-radius, and
+   WeasyPrint drew them as teardrops with tails and squares with lines through
+   them. An SVG circle is a circle. */
+.key {
+  flex: 0 0 auto; display: flex; justify-content: center; align-items: center; gap: 2.8mm;
+  flex-wrap: wrap; font-size: 6.8px; color: var(--muted);
+  margin-top: 1.2mm; padding-top: 1.1mm; border-top: 0.5px solid var(--hair-soft);
+}
+.key span { display: flex; align-items: center; gap: 1mm; white-space: nowrap; }
+.key b { color: var(--ink); font-weight: 700; }
+.key svg { display: block; flex: 0 0 auto; overflow: visible; }
+.key .sep { color: var(--hair); }
+
+.shot-sum { flex: 0 0 auto; text-align: center; font-size: 7.4px; color: var(--muted); padding-top: 0.6mm; }
+.shot-sum b { color: var(--ink); font-weight: 700; }
+
+/* --------------------------------------------------------------- STATS TABLE */
+.stats { flex: 0 0 auto; display: flex; flex-direction: column; }
+.stat-group {
+  font-size: 6.4px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--faint); border-bottom: 0.5px solid var(--hair-soft); padding-bottom: 0.4mm; margin-bottom: 0.3mm;
+}
+.stat-row { display: flex; align-items: center; gap: 1.4mm; padding: 0.42mm 0; font-size: 8px; }
+.stat-row .lab { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stat-row .v { flex: 0 0 9mm; font-variant-numeric: tabular-nums; font-weight: 500; font-size: 8.4px; }
+.stat-row .v.home { text-align: right; }
+.stat-row .v.away { text-align: left; }
+.stat-row .v.cha { color: var(--red); }
+.stat-row .v.opp { color: var(--grey); }
+.stat-row .v.win { font-weight: 800; }
+.stat-row .bar { flex: 0 0 22mm; height: 2.6px; display: flex; overflow: hidden; background: var(--hair-soft); }
+.stat-row .bar .seg.cha { background: var(--red); }
+.stat-row .bar .seg.opp { background: var(--grey); }
+
+/* Plain block, not flex: WeasyPrint stacks a nested column-flex on top of
+   itself. */
+.gloss {
+  flex: 0 0 auto; margin-top: auto; padding-top: 1.1mm; border-top: 0.5px solid var(--hair-soft);
+  font-size: 6.4px; line-height: 1.4; color: var(--muted);
+}
+.gloss p { margin-bottom: 0.4mm; }
+.gloss p:last-child { margin-bottom: 0; }
+.gloss b { color: var(--ink); font-weight: 700; }
+
+/* -------------------------------------------------------- CONTRIBUTION TABLE */
+.contrib { flex: 1 1 auto; display: flex; flex-direction: column; justify-content: space-between; min-height: 0; font-size: 7.6px; }
+.contrib .hd { display: flex; align-items: flex-end; gap: 0.7mm; font-size: 6px; font-weight: 700; letter-spacing: 0.02em; text-transform: uppercase; color: var(--faint); border-bottom: 0.6px solid var(--hair); padding-bottom: 0.7mm; }
+.contrib .rw { display: flex; align-items: center; gap: 0.7mm; padding: 0.72mm 0; border-bottom: 0.4px solid var(--hair-soft); }
+.contrib .rw:last-child { border-bottom: none; }
+.contrib .nm { flex: 1 1 auto; min-width: 0; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.contrib .n { flex: 0 0 7.2mm; text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+.contrib .xg { flex: 0 0 6.6mm; text-align: right; font-variant-numeric: tabular-nums; color: var(--ink); font-weight: 600; }
+.contrib .xt { flex: 0 0 6.6mm; text-align: right; font-variant-numeric: tabular-nums; font-weight: 800; }
+
+.note { flex: 0 0 auto; text-align: center; font-size: 6.4px; line-height: 1.35; color: var(--faint); font-family: var(--serif-text); padding-top: 0.8mm; }
+
+/* --------------------------------------------------------------------- FOOTER */
+.footer {
+  flex: 0 0 auto; display: flex; justify-content: space-between; border-top: 0.8px solid var(--ink);
+  padding-top: 1.2mm; font-size: 6.3px; color: var(--muted);
+}
+.footer b { color: var(--ink); }
+</style>
+</head>
+<body>
+{# ---- legend swatches, as SVG so the shapes are the shapes ------------------ #}
+{% macro sw_goal() %}<svg width="9" height="9" viewBox="0 0 9 9"><circle cx="4.5" cy="4.5" r="3.3" fill="#7d7869" stroke="#1a1a18" stroke-width="1.4"/></svg>{% endmacro %}
+{% macro sw_on() %}<svg width="9" height="9" viewBox="0 0 9 9"><circle cx="4.5" cy="4.5" r="3.6" fill="#7d7869"/></svg>{% endmacro %}
+{% macro sw_off() %}<svg width="9" height="9" viewBox="0 0 9 9"><circle cx="4.5" cy="4.5" r="3.1" fill="none" stroke="#7d7869" stroke-width="1.3"/></svg>{% endmacro %}
+{% macro sw_blocked() %}<svg width="9" height="9" viewBox="0 0 9 9"><rect x="1.1" y="1.1" width="6.8" height="6.8" fill="none" stroke="#7d7869" stroke-width="1.3"/></svg>{% endmacro %}
+{% macro sw_size() %}<svg width="34" height="12" viewBox="0 0 34 12"><circle cx="4" cy="6" r="2.0" fill="#7d7869"/><circle cx="14" cy="6" r="3.6" fill="#7d7869"/><circle cx="27" cy="6" r="5.3" fill="#7d7869"/></svg>{% endmacro %}
+{% macro sw_nodes() %}<svg width="20" height="12" viewBox="0 0 20 12"><circle cx="4" cy="6" r="2.4" fill="#7d7869"/><circle cx="14" cy="6" r="5.0" fill="#7d7869"/></svg>{% endmacro %}
+{% macro sw_lines() %}<svg width="20" height="12" viewBox="0 0 20 12"><line x1="0" y1="6" x2="9" y2="6" stroke="#7d7869" stroke-width="1"/><line x1="11" y1="6" x2="20" y2="6" stroke="#7d7869" stroke-width="4"/></svg>{% endmacro %}
+{% macro sw_arrow(colour) %}<svg width="14" height="9" viewBox="0 0 14 9"><line x1="0" y1="4.5" x2="9" y2="4.5" stroke="{{ colour }}" stroke-width="1.8"/><path d="M9 1.6 L13.4 4.5 L9 7.4 Z" fill="{{ colour }}"/></svg>{% endmacro %}
+{% macro sw_threat() %}<svg width="34" height="10" viewBox="0 0 34 10"><defs><linearGradient id="threatgrad" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#6d3f83"/><stop offset="50%" stop-color="#7d7869"/><stop offset="100%" stop-color="#4f6b3e"/></linearGradient></defs><rect x="0" y="1.5" width="34" height="7" rx="3.5" fill="url(#threatgrad)"/></svg>{% endmacro %}
+{% macro sw_start_sub() %}<svg width="26" height="12" viewBox="0 0 26 12"><circle cx="5" cy="6" r="4.2" fill="#7d7869"/><path d="M21 1.4 L25.6 9.4 L16.4 9.4 Z" fill="#7d7869"/></svg>{% endmacro %}
+
+<div class="page">
+
+  {% set home = sides[0] %}
+  {% set away = sides[1] %}
+
+  <!-- ------------------------------------------------------------- HEADER -->
+  <div class="header">
+    {% if home.badge %}<img src="{{ home.badge }}" alt="{{ home.team }}">{% endif %}
+    <div class="score">
+      <span class="{{ 'cha' if home.is_charlton else 'opp' }}">{{ home.team }} {{ home.goals }}</span>
+      <span class="dash">–</span>
+      <span class="{{ 'cha' if away.is_charlton else 'opp' }}">{{ away.goals }} {{ away.team }}</span>
+    </div>
+    {% if away.badge %}<img src="{{ away.badge }}" alt="{{ away.team }}">{% endif %}
+    <div class="scorers">
+      {% for s in sides %}
+        {% if s.scorers %}
+        <div class="{{ 'cha' if s.is_charlton else 'opp' }}">
+          {% for g in s.scorers %}{{ g.player }} <span class="min">{{ g.minute }}</span>{% if not loop.last %}, {% endif %}{% endfor %}
+        </div>
+        {% endif %}
+      {% endfor %}
+    </div>
+    <div class="spacer"></div>
+    <div class="season">
+      <div class="context">{{ meta.competition }} &middot; {{ meta.season }} &middot; {{ meta.venue }} &middot; {{ meta.date }}</div>
+      <div class="form">
+        <span class="lbl">Last 6</span>
+        {% for f in form %}<i class="{{ f.result }}{{ ' latest' if f.is_last }}" title="v {{ f.opponent }}">{{ f.result }}</i>{% endfor %}
+      </div>
+    </div>
+  </div>
+
+  <!-- ---------------------------------------------- MATCH STATS + SHOT MAPS -->
+  <div class="row" style="flex: 0 0 76mm;">
+    <div class="panel" style="flex: 0 0 76mm;">
+      <div class="panel-label"><span class="mark"></span>Match stats</div>
+      <div class="stats">
+        {% for r in stat_rows %}
+        {% if r.group %}<div class="stat-group">{{ r.group }}</div>{% endif %}
+        <div class="stat-row">
+          <span class="lab">{{ r.label }}</span>
+          <span class="v home {{ 'cha' if r.home_is_charlton else 'opp' }} {{ 'win' if r.home_wins }}">{{ r.home }}</span>
+          <span class="bar">
+            <span class="seg {{ 'cha' if r.home_is_charlton else 'opp' }}" style="width:{{ r.home_share }}%;"></span>
+            <span class="seg {{ 'opp' if r.home_is_charlton else 'cha' }}" style="width:{{ r.away_share }}%;"></span>
+          </span>
+          <span class="v away {{ 'opp' if r.home_is_charlton else 'cha' }} {{ 'win' if r.away_wins }}">{{ r.away }}</span>
+        </div>
+        {% endfor %}
+      </div>
+      <div class="gloss">
+        {% for r in stat_rows if r.gloss %}<p><b>{{ r.label }}</b>: {{ r.gloss }}</p>{% endfor %}
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-label"><span class="mark"></span>Shots</div>
+      <div class="panel-body">
+        {% for s in sides %}
+        <div class="half">
+          <div class="cap {{ 'cha' if s.is_charlton else 'opp' }}">{{ s.team }}</div>
+          <div class="chartbox"><img src="{{ s.shot_map }}" alt=""></div>
+          <div class="shot-sum">
+            <b>{{ s.shot_summary.shots }}</b> shots &middot; <b>{{ s.shot_summary.on_target }}</b> on target &middot;
+            <b>{{ '%.2f'|format(s.shot_summary.xg) }}</b> xG
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      <div class="key">
+        <span>{{ sw_goal() }}Goal</span>
+        <span>{{ sw_on() }}On target</span>
+        <span>{{ sw_off() }}Off target</span>
+        <span>{{ sw_blocked() }}Blocked</span>
+        <span class="sep">|</span>
+        <span>{{ sw_size() }}Circle size = <b>xG</b></span>
+        <span class="sep">|</span>
+        <span>Both attacking upwards</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- --------------------------------------- MOMENTUM + WHERE CHANCES CAME FROM -->
+  <div class="row" style="flex: 1 1 48mm; min-height: 43mm;">
+    <div class="panel">
+      <div class="panel-label"><span class="mark"></span>Momentum</div>
+      <div class="chartbox"><img src="{{ momentum_img }}" alt=""></div>
+      <div class="note">Above the line = {{ meta.charlton_team }}, below = {{ meta.opponent_team }} &middot; circles = goals, triangles = subs, dotted lead = wave value &middot; square-root scale keeps quiet spells visible</div>
+    </div>
+    <div class="panel" style="flex: 0 0 54mm;">
+      <div class="panel-label"><span class="mark"></span>Where the chances came from</div>
+      <div class="chartbox"><img src="{{ chance_source_img }}" alt=""></div>
+    </div>
+  </div>
+
+  <!-- --------------------------------------------------- AVERAGE POSITIONS -->
+  <div class="row" style="flex: 0 0 80mm;">
+    <div class="panel">
+      <div class="panel-label"><span class="mark"></span>Average positions in build-up (starters only)</div>
+      <div class="panel-body">
+        {% for s in sides %}
+        <div class="half">
+          <div class="cap {{ 'cha' if s.is_charlton else 'opp' }}">{{ s.team }}</div>
+          <div class="chartbox"><img src="{{ s.avg_pos_map }}" alt=""></div>
+        </div>
+        {% endfor %}
+      </div>
+      <div class="key">
+        <span>Both attacking upfield &middot; dashed line marks average defensive line height &middot; based on each player's own touches during settled possession, not tracking data</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ------------------------------------------- ENTRIES + CONTRIBUTIONS -->
+  <div class="row" style="flex: 1 1 62mm; min-height: 54mm;">
+    <div class="panel" style="flex: 0 0 102mm;">
+      <div class="panel-label"><span class="mark"></span>Final third &amp; box entries</div>
+      <div class="panel-body">
+        {% for s in sides %}
+        <div class="half">
+          <div class="cap {{ 'cha' if s.is_charlton else 'opp' }}">{{ s.team }}</div>
+          <div class="chartbox"><img src="{{ s.entries }}" alt=""></div>
+        </div>
+        {% endfor %}
+      </div>
+      <div class="key">
+        <span>{{ sw_arrow('#5c7a4a') }}Pass</span>
+        <span>{{ sw_arrow('#c0892d') }}Carry</span>
+        <span>{{ sw_arrow('#a8685f') }}Lost</span>
+        <span class="sep">|</span>
+        <span>{{ sw_lines() }}Thickness = <b>threat gained</b></span>
+        <span class="sep">|</span>
+        <span>Attacking left to right</span>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-label"><span class="mark"></span>Player contribution</div>
+      <div class="contrib">
+        <div class="hd">
+          <span class="nm">Player</span>
+          <span class="n">Passes</span>
+          <span class="n">Ground</span>
+          <span class="n">Aerial</span>
+          <span class="n">Wins</span>
+          <span class="n">Shots</span>
+          <span class="xg">xG</span>
+          <span class="xt">xT</span>
+        </div>
+        {% for p in contributions %}
+        <div class="rw">
+          <span class="nm {{ 'cha' if p.is_charlton else 'opp' }}">{{ p.name }}</span>
+          <span class="n">{{ p.passes }}</span>
+          <span class="n">{{ p.ground }}</span>
+          <span class="n">{{ p.aerial }}</span>
+          <span class="n">{{ p.ball_wins }}</span>
+          <span class="n">{{ p.shots }}</span>
+          <span class="xg">{{ p.xg }}</span>
+          <span class="xt {{ 'cha' if p.is_charlton else 'opp' }}">{{ p.xt }}</span>
+        </div>
+        {% endfor %}
+      </div>
+      <div class="note">Ground / Aerial = duels won &middot; Wins = ball recoveries &middot; xT = packing expected threat</div>
+    </div>
+  </div>
+
+  <div class="footer">
+    <span>Data: IMPECT (via CAFC_TEST_ANALYSIS), single-match sample</span>
+    <span><b>{{ meta.home_team }} v {{ meta.away_team }}</b>, {{ meta.date }}</span>
+    <span>Generated {{ generated_date }}</span>
+  </div>
+
+</div>
+</body>
+</html>
