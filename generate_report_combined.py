@@ -27,16 +27,30 @@ def main() -> int:
     parser.add_argument("--pdf-only", action="store_true")
     args = parser.parse_args()
 
+    from src.db.query_runner import QueryRunner
     from src.dvms.loaders.fixtures import resolve_fixture
     from src.dvms.preprocess import is_preprocessed, preprocess_fixture
+    from src.report import metrics
+    from src.report.render_combined import FixtureMismatchError, _assert_same_fixture, render_report
 
     fixture = resolve_fixture(args.dvms_match_id)
+
+    # Validate that the two ids refer to the same real-world fixture BEFORE
+    # paying for the (potentially multi-minute, ~28MB download) DVMS
+    # preprocessing step below — a mistyped --impect-match-id should fail
+    # fast, not after preprocessing has already run.
+    try:
+        impect_events = QueryRunner().load_match_events(args.impect_match_id, refresh=args.refresh)
+        impect_meta = metrics.match_meta(impect_events)
+        _assert_same_fixture(impect_meta, fixture)
+    except (FixtureMismatchError, LookupError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
     if not is_preprocessed(fixture.opta_match_id):
         print(f"cache not ready for {fixture.opta_match_id}; preprocessing "
               "(first run downloads ~28MB of tracking) ...")
         preprocess_fixture(fixture.fixture_id, fixture.opta_match_id)
-
-    from src.report.render_combined import render_report
 
     formats = ("html",) if args.html_only else (("pdf",) if args.pdf_only else ("html", "pdf"))
     outputs = render_report(args.impect_match_id, fixture.opta_match_id, formats=formats, refresh=args.refresh)

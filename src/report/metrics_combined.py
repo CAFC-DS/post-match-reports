@@ -73,12 +73,32 @@ def blended_player_contributions(impect_events: pd.DataFrame, dvms_match, top_n:
     """Composite contribution ranking blending Impect on-ball value with
     DVMS physical output.
 
-    Player identity is joined on lower-cased surname — there is no shared
-    player id between Impect and Opta in this codebase (unlike the
-    CAFC_PLAYER_ID cross-provider resolution DATA_MODEL.md documents for
-    Impect-to-canonical joins; no Impect-to-Opta equivalent exists). A
-    duplicate surname within one team's squad would collide silently; this
-    is a known limitation, not yet hit in practice.
+    Player identity is joined on ``(team, lower-cased surname)`` — there is
+    no shared player id between Impect and Opta in this codebase (unlike
+    the CAFC_PLAYER_ID cross-provider resolution DATA_MODEL.md documents
+    for Impect-to-canonical joins; no Impect-to-Opta equivalent exists).
+    The team component is resolved the same way ``combined_team_stats``
+    resolves cross-vendor team identity: never by comparing the two
+    providers' name strings directly (they can differ, e.g. "Charlton
+    Athletic" vs an Opta abbreviation), but via the home/away side, which
+    both providers agree on as a fact of the match. Each DVMS row's
+    ``team_id`` is mapped to a side via ``dvms_match.side_of``, and that
+    side is mapped to the Impect squad name via ``impect_metrics.match_meta``
+    — the same pattern render_combined.py's ``side_to_team`` uses.
+
+    Without a team component, a surname shared across *both* squads (e.g.
+    two players named "Smith", one per team) would fan out in the merge —
+    one Impect row matching DVMS rows from both teams — silently
+    duplicating that player in the output and attaching the wrong team's
+    physical data to them. Keying on (team, surname) prevents that
+    cross-squad collision.
+
+    A genuine surname collision *within* one squad (two same-surname
+    players on the same team) is a known, accepted limitation: the
+    DVMS-side frame is deduplicated to one row per (team, surname) before
+    the merge, so such a collision degrades to one arbitrary match rather
+    than fanning out to multiple rows, but the "wrong" of the two players
+    may end up with the other's physical data. Not yet hit in practice.
 
     Both source functions are called with a large top_n so the join has
     the full squads to work with, not just each source's own top-10 cut —
@@ -96,19 +116,33 @@ def blended_player_contributions(impect_events: pd.DataFrame, dvms_match, top_n:
     impect_all = impect_metrics.player_contributions(impect_events, top_n=1000)
     dvms_all = metrics_dvms.player_contributions_dvms(dvms_match, top_n=1000)
 
-    impect_all = impect_all.assign(_key=impect_all["surname"].str.lower())
-    dvms_physical = dvms_all.assign(_key=dvms_all["name"].str.lower())[["_key", "distance", "top_speed"]]
+    meta = impect_metrics.match_meta(impect_events)
+    side_to_team = {"home": meta.home_team, "away": meta.away_team}
 
-    merged = impect_all.merge(dvms_physical, on="_key", how="left").drop(columns="_key")
+    impect_all = impect_all.assign(
+        _team_key=impect_all["squadName"].str.strip().str.lower(),
+        _name_key=impect_all["surname"].str.lower(),
+    )
+
+    dvms_all = dvms_all.assign(
+        _team_key=dvms_all["team_id"].map(lambda t: side_to_team[dvms_match.side_of(t)]).str.strip().str.lower(),
+        _name_key=dvms_all["name"].str.lower(),
+    )
+    dvms_all = dvms_all.drop_duplicates(subset=["_team_key", "_name_key"])
+    dvms_physical = dvms_all[["_team_key", "_name_key", "distance", "top_speed"]]
+
+    merged = impect_all.merge(dvms_physical, on=["_team_key", "_name_key"], how="left").drop(
+        columns=["_team_key", "_name_key"]
+    )
 
     def _z(s: pd.Series) -> pd.Series:
         std = s.std(ddof=0)
         return (s - s.mean()) / std if std else pd.Series(0.0, index=s.index)
 
     dist_mean = merged["distance"].mean()
-    dist = merged["distance"].fillna(dist_mean if not pd.isna(dist_mean) else 0)
+    dist = merged["distance"].astype(float).fillna(dist_mean if not pd.isna(dist_mean) else 0)
     speed_mean = merged["top_speed"].mean()
-    speed = merged["top_speed"].fillna(speed_mean if not pd.isna(speed_mean) else 0)
+    speed = merged["top_speed"].astype(float).fillna(speed_mean if not pd.isna(speed_mean) else 0)
 
     merged["composite"] = (
         0.40 * _z(merged["xt"])
