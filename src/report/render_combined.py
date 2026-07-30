@@ -43,6 +43,12 @@ def _assert_same_fixture(impect_meta, dvms_fixture) -> None:
             f"Impect match {impect_meta.home_team} v {impect_meta.away_team} does not match "
             f"DVMS fixture {dvms_fixture.home_team} v {dvms_fixture.away_team}."
         )
+    if _normalize(impect_meta.home_team) != _normalize(dvms_fixture.home_team):
+        raise FixtureMismatchError(
+            f"Impect and DVMS disagree on which team was home: Impect says {impect_meta.home_team} "
+            f"(home) v {impect_meta.away_team} (away); DVMS says {dvms_fixture.home_team} (home) "
+            f"v {dvms_fixture.away_team} (away)."
+        )
     impect_date = impect_meta.kickoff.date()
     dvms_date = dvms_fixture.match_date.date()
     if impect_date != dvms_date:

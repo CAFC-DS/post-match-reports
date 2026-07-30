@@ -30,3 +30,13 @@ def test_mismatched_teams_raises():
 def test_mismatched_date_raises():
     with pytest.raises(FixtureMismatchError):
         _assert_same_fixture(_impect_meta(kickoff="2026-01-10"), _dvms_fixture(match_date="2026-01-11"))
+
+
+def test_swapped_home_away_raises():
+    # Same two teams (set check would pass) but the two feeds disagree on
+    # which team was home — must still raise, not silently misattribute.
+    with pytest.raises(FixtureMismatchError):
+        _assert_same_fixture(
+            _impect_meta(home="Charlton Athletic", away="Swansea City"),
+            _dvms_fixture(home="Swansea City", away="Charlton Athletic"),
+        )
