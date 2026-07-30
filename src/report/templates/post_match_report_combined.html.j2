@@ -261,19 +261,28 @@ body { font-family: var(--sans); color: var(--ink); background: #2b2a27; }
   </div>
 
   <!-- --------------------------------------------------- AVERAGE POSITIONS -->
-  <div class="row" style="flex: 0 0 80mm;">
+  <div class="row" style="flex: 0 0 84mm;">
     <div class="panel">
-      <div class="panel-label"><span class="mark"></span>Average positions in build-up (starters only)</div>
+      <div class="panel-label"><span class="mark"></span>Average positions, all eleven starters (tracked)</div>
       <div class="panel-body">
         {% for s in sides %}
         <div class="half">
           <div class="cap {{ 'cha' if s.is_charlton else 'opp' }}">{{ s.team }}</div>
-          <div class="chartbox"><img src="{{ s.avg_pos_map }}" alt=""></div>
+          <div class="panel-body">
+            <div class="half">
+              <div class="cap" style="font-size: 7px;">In possession</div>
+              <div class="chartbox"><img src="{{ s.avg_pos_in }}" alt=""></div>
+            </div>
+            <div class="half">
+              <div class="cap" style="font-size: 7px;">Out of possession</div>
+              <div class="chartbox"><img src="{{ s.avg_pos_out }}" alt=""></div>
+            </div>
+          </div>
         </div>
         {% endfor %}
       </div>
       <div class="key">
-        <span>Both attacking upfield &middot; dashed line marks average defensive line height &middot; from Second Spectrum tracking (in possession), via DVMS</span>
+        <span>Both attacking upfield &middot; every player's mean tracked position over all live frames of the phase (Second Spectrum 25fps tracking, via DVMS) &middot; dashed line = average defensive line height</span>
       </div>
     </div>
   </div>

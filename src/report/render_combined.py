@@ -160,13 +160,19 @@ def build_context(impect_match_id: int, dvms_opta_match_id: str, refresh: bool =
     contributions = metrics_combined.blended_player_contributions(events, dvms_match, top_n=10)
     chances = metrics.chance_sources(events, impect_meta.home_team, impect_meta.away_team)
 
-    avg_pos_in_possession = {
-        team: metrics_dvms.avg_position_frame(dvms_match, team_to_side[team], "in_possession")
-        for team in (charlton, opponent)
+    avg_pos = {
+        phase: {
+            team: metrics_dvms.avg_position_frame(dvms_match, team_to_side[team], phase)
+            for team in (charlton, opponent)
+        }
+        for phase in ("in_possession", "out_of_possession")
     }
-    line_height_in_possession = {
-        team: metrics_dvms.line_height_m(dvms_match, team_to_side[team], "in_possession")
-        for team in (charlton, opponent)
+    line_height = {
+        phase: {
+            team: metrics_dvms.line_height_m(dvms_match, team_to_side[team], phase)
+            for team in (charlton, opponent)
+        }
+        for phase in ("in_possession", "out_of_possession")
     }
 
     max_threat = max((float(e["threat"].max()) if not e.empty else 0.0) for e in entries.values())
@@ -184,8 +190,10 @@ def build_context(impect_match_id: int, dvms_opta_match_id: str, refresh: bool =
             "shot_summary": metrics.shot_summary(shots, team),
             "entries": pitch.entry_map(entries[team], max_threat),
             "entries_style_split": entries_style_split[team],
-            "avg_pos_map": pitch.average_position_map(
-                avg_pos_in_possession[team], color, line_height_in_possession[team], vertical=True),
+            "avg_pos_in": pitch.average_position_map(
+                avg_pos["in_possession"][team], color, line_height["in_possession"][team], vertical=True),
+            "avg_pos_out": pitch.average_position_map(
+                avg_pos["out_of_possession"][team], color, line_height["out_of_possession"][team], vertical=True),
         }
 
     context: dict[str, Any] = {
