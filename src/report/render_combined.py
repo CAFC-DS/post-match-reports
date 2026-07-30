@@ -15,9 +15,8 @@ from typing import Any
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
-from src.db.query_runner import QueryRunner
 from src.dvms.loaders.fixtures import resolve_fixture
-from src.report import chart, chart_dvms, metrics, metrics_combined, metrics_dvms, palette, pitch
+from src.report import chart, chart_dvms, impect_cafcdb_source, metrics, metrics_combined, metrics_dvms, palette, pitch
 from src.report.metrics import STAT_GLOSS, STAT_ROWS
 from src.visualisation.badges import badge_data_uri
 
@@ -107,9 +106,8 @@ def _contribution_rows(df: Any, charlton: str) -> list[dict[str, Any]]:
     ]
 
 
-def build_context(impect_match_id: int, dvms_opta_match_id: str, refresh: bool = False) -> dict[str, Any]:
-    runner = QueryRunner()
-    events = runner.load_match_events(impect_match_id, refresh=refresh)
+def build_context(impect_match_id: int, dvms_opta_match_id: str) -> dict[str, Any]:
+    events = impect_cafcdb_source.load_match_events(impect_match_id)
     impect_meta = metrics.match_meta(events)
 
     dvms_fixture = resolve_fixture(dvms_opta_match_id)
@@ -156,7 +154,8 @@ def build_context(impect_match_id: int, dvms_opta_match_id: str, refresh: bool =
     dvms_name_to_side = {dvms_match.team_name_of(s): s for s in ("home", "away")}
     for marker in dvms_goal_markers:
         marker["team"] = side_to_team[dvms_name_to_side[marker["team"]]]
-    season = metrics.season_context(runner.load_season_results(refresh=refresh), charlton, impect_meta.kickoff)
+    season_results = impect_cafcdb_source.load_season_results(int(events["iterationId"].iloc[0]))
+    season = metrics.season_context(season_results, charlton, impect_meta.kickoff)
     contributions = metrics_combined.blended_player_contributions(events, dvms_match, top_n=10)
     chances = metrics.chance_sources(events, impect_meta.home_team, impect_meta.away_team)
 
@@ -225,8 +224,8 @@ def build_context(impect_match_id: int, dvms_opta_match_id: str, refresh: bool =
 
 def render_report(impect_match_id: int, dvms_opta_match_id: str,
                    output_dir: Path | str = DEFAULT_OUTPUT_DIR,
-                   formats: tuple[str, ...] = ("html", "pdf"), refresh: bool = False) -> dict[str, Path]:
-    context = build_context(impect_match_id, dvms_opta_match_id, refresh=refresh)
+                   formats: tuple[str, ...] = ("html", "pdf")) -> dict[str, Path]:
+    context = build_context(impect_match_id, dvms_opta_match_id)
 
     env = Environment(
         loader=FileSystemLoader(str(TEMPLATES_DIR)),

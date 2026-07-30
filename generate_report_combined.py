@@ -18,19 +18,16 @@ import sys
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--impect-match-id", type=int, required=True,
-                        help="IMPECT_EVENTS_STAGING matchId")
+                        help="Impect matchId (CAFC_DB.IMPECT_RAW.EVENTS/MATCHES)")
     parser.add_argument("--dvms-match-id", required=True,
                         help="DVMS/Opta match id (see: python -m src.dvms.cli list-fixtures)")
-    parser.add_argument("--refresh", action="store_true",
-                        help="Bypass the local parquet cache and repull Impect events from Snowflake.")
     parser.add_argument("--html-only", action="store_true")
     parser.add_argument("--pdf-only", action="store_true")
     args = parser.parse_args()
 
-    from src.db.query_runner import QueryRunner
     from src.dvms.loaders.fixtures import resolve_fixture
     from src.dvms.preprocess import is_preprocessed, preprocess_fixture
-    from src.report import metrics
+    from src.report import impect_cafcdb_source, metrics
     from src.report.render_combined import FixtureMismatchError, _assert_same_fixture, render_report
 
     fixture = resolve_fixture(args.dvms_match_id)
@@ -40,7 +37,7 @@ def main() -> int:
     # preprocessing step below — a mistyped --impect-match-id should fail
     # fast, not after preprocessing has already run.
     try:
-        impect_events = QueryRunner().load_match_events(args.impect_match_id, refresh=args.refresh)
+        impect_events = impect_cafcdb_source.load_match_events(args.impect_match_id)
         impect_meta = metrics.match_meta(impect_events)
         _assert_same_fixture(impect_meta, fixture)
     except (FixtureMismatchError, LookupError) as e:
@@ -53,7 +50,7 @@ def main() -> int:
         preprocess_fixture(fixture.fixture_id, fixture.opta_match_id)
 
     formats = ("html",) if args.html_only else (("pdf",) if args.pdf_only else ("html", "pdf"))
-    outputs = render_report(args.impect_match_id, fixture.opta_match_id, formats=formats, refresh=args.refresh)
+    outputs = render_report(args.impect_match_id, fixture.opta_match_id, formats=formats)
     for fmt, path in outputs.items():
         print(f"Wrote {fmt.upper()}: {path}")
     return 0
