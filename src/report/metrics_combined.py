@@ -11,6 +11,7 @@ import pandas as pd
 
 from src.report import metrics as impect_metrics
 from src.report import metrics_dvms
+from src.report import skillcorner_source
 from src.dvms.metrics.line_breaks import line_breaking_passes
 
 
@@ -112,6 +113,13 @@ def blended_player_contributions(impect_events: pd.DataFrame, dvms_match, top_n:
     Spectrum physical data — the only components tracking-derived).
     Weights are a starting point, expected to need visual tuning against
     known matches; not treated as fixed science.
+
+    Also carries ``sc_minutes``/``sc_distance``/``sc_hsr``/``sc_sprint`` from SkillCorner
+    (``skillcorner_source.load_physical_summary``), joined the same way as
+    the DVMS physical columns. Display-only -- unlike ``distance``/
+    ``top_speed`` above, these do not feed ``composite``, since introducing a
+    second physical source into the ranking would double-count physical
+    output against the DVMS component already weighted in.
     """
     impect_all = impect_metrics.player_contributions(impect_events, top_n=1000)
     dvms_all = metrics_dvms.player_contributions_dvms(dvms_match, top_n=1000)
@@ -131,9 +139,35 @@ def blended_player_contributions(impect_events: pd.DataFrame, dvms_match, top_n:
     dvms_all = dvms_all.drop_duplicates(subset=["_team_key", "_name_key"])
     dvms_physical = dvms_all[["_team_key", "_name_key", "distance", "top_speed"]]
 
-    merged = impect_all.merge(dvms_physical, on=["_team_key", "_name_key"], how="left").drop(
-        columns=["_team_key", "_name_key"]
+    merged = impect_all.merge(dvms_physical, on=["_team_key", "_name_key"], how="left")
+
+    # SkillCorner physical summary, joined on the same (team, surname)
+    # convention as the DVMS merge above. Named ``sc_*`` (not ``distance``/
+    # ``top_speed``) since those names are already taken by the DVMS Second
+    # Spectrum columns feeding the composite score below -- an unprefixed
+    # merge here would silently collide into ``distance_x``/``distance_y``.
+    # Display-only: these columns do not feed ``composite``.
+    sc_physical = skillcorner_source.load_physical_summary(
+        meta.kickoff.strftime("%Y-%m-%d"), meta.home_team, meta.away_team,
     )
+    if not sc_physical.empty:
+        sc_physical = sc_physical.rename(
+            columns={
+                "minutes": "sc_minutes", "distance": "sc_distance",
+                "hsr_distance": "sc_hsr", "sprint_distance": "sc_sprint",
+            }
+        )
+        merged = merged.merge(
+            sc_physical[["_team_key", "_name_key", "sc_minutes", "sc_distance", "sc_hsr", "sc_sprint"]],
+            on=["_team_key", "_name_key"], how="left",
+        )
+    else:
+        merged["sc_minutes"] = pd.NA
+        merged["sc_distance"] = pd.NA
+        merged["sc_hsr"] = pd.NA
+        merged["sc_sprint"] = pd.NA
+
+    merged = merged.drop(columns=["_team_key", "_name_key"])
 
     def _z(s: pd.Series) -> pd.Series:
         std = s.std(ddof=0)

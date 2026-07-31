@@ -13,6 +13,7 @@ import datetime as dt
 from pathlib import Path
 from typing import Any
 
+import pandas as pd
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from src.dvms.loaders.fixtures import resolve_fixture
@@ -89,6 +90,13 @@ def _stat_rows(stats: Any, home: str, away: str, charlton: str) -> list[dict[str
     return rows
 
 
+def _fmt_or_dash(value: Any, fmt: str) -> str:
+    """SkillCorner physical figures are a left-joined, name-matched
+    add-on (see ``skillcorner_source``) -- a player with no matching row
+    should read as visibly missing, not as a false zero."""
+    return "—" if pd.isna(value) else format(value, fmt)
+
+
 def _contribution_rows(df: Any, charlton: str) -> list[dict[str, Any]]:
     return [
         {
@@ -101,6 +109,10 @@ def _contribution_rows(df: Any, charlton: str) -> list[dict[str, Any]]:
             "shots": int(r["shots"]),
             "xg": f"{r['xg']:.2f}",
             "xt": f"{r['xt']:.2f}",
+            "sc_minutes": _fmt_or_dash(r["sc_minutes"], ".0f"),
+            "sc_distance_km": _fmt_or_dash(r["sc_distance"] / 1000 if pd.notna(r["sc_distance"]) else pd.NA, ".1f"),
+            "sc_hsr": _fmt_or_dash(r["sc_hsr"], ".0f"),
+            "sc_sprint": _fmt_or_dash(r["sc_sprint"], ".0f"),
         }
         for _, r in df.iterrows()
     ]
@@ -207,6 +219,7 @@ def build_context(impect_match_id: int, dvms_opta_match_id: str) -> dict[str, An
             "competition": impect_meta.competition,
             "season": impect_meta.season,
             "date": impect_meta.kickoff.strftime("%d/%m/%Y"),
+            "date_long": impect_meta.kickoff.strftime("%-d %B %Y"),
             "result": impect_meta.result,
         },
         "form": [

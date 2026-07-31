@@ -52,7 +52,9 @@ body { font-family: var(--sans); color: var(--ink); background: #2b2a27; }
 .dash { color: var(--faint); }
 
 .season { flex: 0 0 auto; text-align: right; }
-.season .context { font-size: 7.4px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.07em; font-weight: 600; white-space: nowrap; }
+.season .context { font-size: 7.4px; text-transform: uppercase; letter-spacing: 0.07em; white-space: nowrap; }
+.season .context .hi { color: var(--ink); font-weight: 800; }
+.season .context .lo { color: var(--muted); font-weight: 500; margin-left: 0.4mm; }
 .season .form { display: flex; gap: 1mm; justify-content: flex-end; align-items: center; margin-top: 1.2mm; }
 .season .form .lbl { font-size: 6.6px; color: var(--faint); text-transform: uppercase; letter-spacing: 0.08em; font-weight: 700; margin-right: 0.4mm; }
 .season .form i {
@@ -133,15 +135,17 @@ body { font-family: var(--sans); color: var(--ink); background: #2b2a27; }
 
 /* -------------------------------------------------------- CONTRIBUTION TABLE */
 .contrib { flex: 1 1 auto; display: flex; flex-direction: column; justify-content: space-between; min-height: 0; font-size: 7.6px; }
-.contrib .hd { display: flex; align-items: flex-end; gap: 0.7mm; font-size: 6px; font-weight: 700; letter-spacing: 0.02em; text-transform: uppercase; color: var(--faint); border-bottom: 0.6px solid var(--hair); padding-bottom: 0.7mm; }
-.contrib .rw { display: flex; align-items: center; gap: 0.7mm; padding: 0.72mm 0; border-bottom: 0.4px solid var(--hair-soft); }
+.contrib .hd { display: flex; align-items: flex-end; gap: 0.5mm; font-size: 6px; font-weight: 700; letter-spacing: 0.02em; text-transform: uppercase; color: var(--faint); border-bottom: 0.6px solid var(--hair); padding-bottom: 0.7mm; }
+.contrib .rw { display: flex; align-items: center; gap: 0.5mm; padding: 0.72mm 0; border-bottom: 0.4px solid var(--hair-soft); }
 .contrib .rw:last-child { border-bottom: none; }
 .contrib .nm { flex: 1 1 auto; min-width: 0; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.contrib .n { flex: 0 0 7.2mm; text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
-.contrib .xg { flex: 0 0 6.6mm; text-align: right; font-variant-numeric: tabular-nums; color: var(--ink); font-weight: 600; }
-.contrib .xt { flex: 0 0 6.6mm; text-align: right; font-variant-numeric: tabular-nums; font-weight: 800; }
+.contrib .n { flex: 0 0 6.0mm; text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+.contrib .xg { flex: 0 0 6.0mm; text-align: right; font-variant-numeric: tabular-nums; color: var(--ink); font-weight: 600; }
+.contrib .xt { flex: 0 0 6.0mm; text-align: right; font-variant-numeric: tabular-nums; font-weight: 800; }
+.contrib .p { flex: 0 0 6.0mm; text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
 
 .note { flex: 0 0 auto; text-align: center; font-size: 6.4px; line-height: 1.35; color: var(--faint); font-family: var(--serif-text); padding-top: 0.8mm; }
+.contrib + .note { margin-top: 1.4mm; padding-top: 1mm; border-top: 0.4px solid var(--hair-soft); }
 
 /* --------------------------------------------------------------------- FOOTER */
 .footer {
@@ -189,7 +193,10 @@ body { font-family: var(--sans); color: var(--ink); background: #2b2a27; }
     </div>
     <div class="spacer"></div>
     <div class="season">
-      <div class="context">{{ meta.competition }} &middot; {{ meta.season }} &middot; {{ meta.venue }} &middot; {{ meta.date }}</div>
+      <div class="context">
+        <span class="hi">{{ meta.competition }}</span>
+        <span class="lo">&middot; {{ meta.season }} &middot; {{ meta.date_long }}</span>
+      </div>
       <div class="form">
         <span class="lbl">Last 6</span>
         {% for f in form %}<i class="{{ f.result }}{{ ' latest' if f.is_last }}" title="v {{ f.opponent }}">{{ f.result }}</i>{% endfor %}
@@ -322,10 +329,14 @@ body { font-family: var(--sans); color: var(--ink); background: #2b2a27; }
       <div class="contrib">
         <div class="hd">
           <span class="nm">Player</span>
+          <span class="p">Mins</span>
+          <span class="p">Dist</span>
+          <span class="p">HSR</span>
+          <span class="p">Spr</span>
           <span class="n">Passes</span>
-          <span class="n">Ground</span>
-          <span class="n">Aerial</span>
-          <span class="n">Wins</span>
+          <span class="n">Grd</span>
+          <span class="n">Air</span>
+          <span class="n">Recov</span>
           <span class="n">Shots</span>
           <span class="xg">xG</span>
           <span class="xt">xT</span>
@@ -333,6 +344,10 @@ body { font-family: var(--sans); color: var(--ink); background: #2b2a27; }
         {% for p in contributions %}
         <div class="rw">
           <span class="nm {{ 'cha' if p.is_charlton else 'opp' }}">{{ p.name }}</span>
+          <span class="p">{{ p.sc_minutes }}</span>
+          <span class="p">{{ p.sc_distance_km }}</span>
+          <span class="p">{{ p.sc_hsr }}</span>
+          <span class="p">{{ p.sc_sprint }}</span>
           <span class="n">{{ p.passes }}</span>
           <span class="n">{{ p.ground }}</span>
           <span class="n">{{ p.aerial }}</span>
@@ -343,7 +358,7 @@ body { font-family: var(--sans); color: var(--ink); background: #2b2a27; }
         </div>
         {% endfor %}
       </div>
-      <div class="note">Ground / Aerial = duels won &middot; Wins = ball recoveries &middot; xT = packing expected threat</div>
+      <div class="note">Mins/Dist/HSR/Spr = minutes played, distance (km), high-speed running distance (m), sprint distance (m), SkillCorner &middot; Grd / Air = ground / aerial duels won &middot; Recov = ball recoveries &middot; xT = packing expected threat</div>
     </div>
   </div>
 
