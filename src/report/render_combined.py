@@ -16,8 +16,8 @@ from typing import Any
 import pandas as pd
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
-from src.dvms.loaders.fixtures import resolve_fixture
-from src.report import chart, chart_dvms, impect_cafcdb_source, metrics, metrics_combined, metrics_dvms, palette, pitch
+from src.dvms.loaders.fixtures import normalize_team_name, resolve_fixture, resolve_fixture_for_match
+from src.report import chart, chart_dvms, impect_cafcdb_source, metrics, metrics_combined, metrics_dvms, metrics_v2, palette, pitch
 from src.report.metrics import STAT_GLOSS, STAT_ROWS
 from src.visualisation.badges import badge_data_uri
 
@@ -32,7 +32,7 @@ class FixtureMismatchError(ValueError):
 
 
 def _normalize(name: str) -> str:
-    return name.strip().lower()
+    return normalize_team_name(name)
 
 
 def _assert_same_fixture(impect_meta, dvms_fixture) -> None:
@@ -118,13 +118,29 @@ def _contribution_rows(df: Any, charlton: str) -> list[dict[str, Any]]:
     ]
 
 
-def build_context(impect_match_id: int, dvms_opta_match_id: str) -> dict[str, Any]:
+def build_context(impect_match_id: int, dvms_opta_match_id: str | None = None,
+                  force_impect_only: bool = False) -> dict[str, Any]:
     events = impect_cafcdb_source.load_match_events(impect_match_id)
     impect_meta = metrics.match_meta(events)
 
-    dvms_fixture = resolve_fixture(dvms_opta_match_id)
-    _assert_same_fixture(impect_meta, dvms_fixture)
-    dvms_match = metrics_dvms.load_match(dvms_fixture)
+    warnings: list[str] = []
+    dvms_fixture = None
+    dvms_match = None
+    if not force_impect_only:
+        dvms_fixture = (
+            resolve_fixture(dvms_opta_match_id)
+            if dvms_opta_match_id
+            else resolve_fixture_for_match(
+                impect_meta.home_team, impect_meta.away_team, impect_meta.kickoff,
+            )
+        )
+        if dvms_fixture is not None:
+            _assert_same_fixture(impect_meta, dvms_fixture)
+            try:
+                dvms_match = metrics_dvms.load_match(dvms_fixture)
+                warnings.extend(dvms_match.issues)
+            except Exception as exc:
+                warnings.append(f"DVMS load failed; using Impect fallbacks: {exc}")
 
     charlton, opponent = impect_meta.charlton_team, impect_meta.opponent_team
 
@@ -146,16 +162,48 @@ def build_context(impect_match_id: int, dvms_opta_match_id: str) -> dict[str, An
     side_to_team = {"home": impect_meta.home_team, "away": impect_meta.away_team}
     team_to_side = {impect_meta.home_team: "home", impect_meta.away_team: "away"}
 
-    stats = metrics_combined.combined_team_stats(events, dvms_match)
+    panel_sources: dict[str, str] = {
+        "shots": "Impect", "chance_sources": "Impect", "entries": "Impect",
+    }
+    try:
+        stats = metrics_combined.combined_team_stats(events, dvms_match)
+        panel_sources["possession"] = "DVMS tracking" if dvms_match is not None else "Impect events"
+    except Exception as exc:
+        warnings.append(f"possession: {exc}")
+        stats = metrics_combined.combined_team_stats(events)
+        panel_sources["possession"] = "Impect events"
     goals = metrics.goal_events(events)
     shots = metrics.shot_events(events)
     entries = {team: metrics.zone_entries(events, team) for team in (charlton, opponent)}
-    entries_style_split = {
-        side_to_team[side]: metrics_combined.line_break_style_split(dvms_match, side)
-        for side in ("home", "away")
-    }
-    wave = metrics_dvms.territory_wave(dvms_match)
-    dvms_goal_markers = metrics_dvms.goal_markers(dvms_match)
+    line_breaks_available = False
+    if dvms_match is not None:
+        try:
+            entries_style_split = {
+                side_to_team[side]: metrics_combined.line_break_style_split(dvms_match, side)
+                for side in ("home", "away")
+            }
+            line_breaks_available = True
+            panel_sources["entry_context"] = "DVMS tracking"
+        except Exception as exc:
+            warnings.append(f"line breaks: {exc}")
+    if not line_breaks_available:
+        entries_style_split = {
+            team: metrics_combined.entry_effectiveness(entries[team])
+            for team in (charlton, opponent)
+        }
+        panel_sources["entry_context"] = "Impect events"
+
+    territory_is_tracked = False
+    if dvms_match is not None:
+        try:
+            wave = metrics_dvms.territory_wave(dvms_match)
+            if wave.empty:
+                raise ValueError("tracked territory is empty")
+            dvms_goal_markers = metrics_dvms.goal_markers(dvms_match)
+            territory_is_tracked = True
+        except Exception as exc:
+            warnings.append(f"territory: {exc}")
+    if territory_is_tracked:
     # goal_markers() labels each goal's "team" field using the DVMS/Opta name
     # (f24.home_team_name/away_team_name) — chart_dvms.territory_chart then
     # compares that field against the charlton/opponent strings we pass it,
@@ -163,28 +211,61 @@ def build_context(impect_match_id: int, dvms_opta_match_id: str) -> dict[str, An
     # side (both names come from the same DvmsMatch object, so this lookup is
     # internally consistent) rather than trusting the two providers' strings
     # to match exactly — see the cross-vendor naming note above.
-    dvms_name_to_side = {dvms_match.team_name_of(s): s for s in ("home", "away")}
-    for marker in dvms_goal_markers:
-        marker["team"] = side_to_team[dvms_name_to_side[marker["team"]]]
+        dvms_name_to_side = {dvms_match.team_name_of(s): s for s in ("home", "away")}
+        for marker in dvms_goal_markers:
+            marker["team"] = side_to_team[dvms_name_to_side[marker["team"]]]
+        territory_img = chart_dvms.territory_chart(wave, dvms_goal_markers, charlton, opponent)
+        panel_sources["territory"] = "DVMS tracking"
+    else:
+        territory_img = chart.momentum_chart(
+            metrics.momentum(events, charlton, opponent),
+            metrics.timeline(events, impect_meta.home_team, impect_meta.away_team),
+            charlton, opponent,
+        )
+        panel_sources["territory"] = "Impect pXT"
     season_results = impect_cafcdb_source.load_season_results(int(events["iterationId"].iloc[0]))
     season = metrics.season_context(season_results, charlton, impect_meta.kickoff)
-    contributions = metrics_combined.blended_player_contributions(events, dvms_match, top_n=10)
+    try:
+        contributions = metrics_combined.enriched_player_contributions(events, dvms_match, top_n=10)
+    except Exception as exc:
+        warnings.append(f"physical contribution: {exc}")
+        contributions = metrics_combined.enriched_player_contributions(events, None, top_n=10)
+    has_physical = bool(contributions[["sc_minutes", "sc_distance", "sc_hsr", "sc_sprint"]].notna().any().any())
+    panel_sources["player_ranking"] = "Impect pXT"
+    panel_sources["physical"] = "DVMS" if has_physical else "Unavailable"
     chances = metrics.chance_sources(events, impect_meta.home_team, impect_meta.away_team)
 
-    avg_pos = {
-        phase: {
-            team: metrics_dvms.avg_position_frame(dvms_match, team_to_side[team], phase)
-            for team in (charlton, opponent)
-        }
-        for phase in ("in_possession", "out_of_possession")
-    }
-    line_height = {
-        phase: {
-            team: metrics_dvms.line_height_m(dvms_match, team_to_side[team], phase)
-            for team in (charlton, opponent)
-        }
-        for phase in ("in_possession", "out_of_possession")
-    }
+    tracked_shapes = False
+    if dvms_match is not None:
+        try:
+            avg_pos = {
+                phase: {
+                    team: metrics_dvms.avg_position_frame(dvms_match, team_to_side[team], phase)
+                    for team in (charlton, opponent)
+                }
+                for phase in ("in_possession", "out_of_possession")
+            }
+            line_height = {
+                phase: {
+                    team: metrics_dvms.line_height_m(dvms_match, team_to_side[team], phase)
+                    for team in (charlton, opponent)
+                }
+                for phase in ("in_possession", "out_of_possession")
+            }
+            if any(avg_pos[p][t].empty for p in avg_pos for t in avg_pos[p]):
+                raise ValueError("one or more tracked average-position panels are empty")
+            tracked_shapes = True
+            panel_sources["average_positions"] = "DVMS tracking"
+        except Exception as exc:
+            warnings.append(f"average positions: {exc}")
+    if not tracked_shapes:
+        avg_pos = {"in_possession": {}}
+        line_height = {"in_possession": {}}
+        for team in (charlton, opponent):
+            frame = metrics_v2.average_positions_in_possession(events, team)
+            avg_pos["in_possession"][team] = frame
+            line_height["in_possession"][team] = metrics_v2.average_line_height(frame)
+        panel_sources["average_positions"] = "Impect event locations"
 
     max_threat = max((float(e["threat"].max()) if not e.empty else 0.0) for e in entries.values())
 
@@ -202,9 +283,14 @@ def build_context(impect_match_id: int, dvms_opta_match_id: str) -> dict[str, An
             "entries": pitch.entry_map(entries[team], max_threat),
             "entries_style_split": entries_style_split[team],
             "avg_pos_in": pitch.average_position_map(
-                avg_pos["in_possession"][team], color, line_height["in_possession"][team], vertical=True),
-            "avg_pos_out": pitch.average_position_map(
-                avg_pos["out_of_possession"][team], color, line_height["out_of_possession"][team], vertical=True),
+                avg_pos["in_possession"][team], color, line_height["in_possession"][team],
+                vertical=tracked_shapes),
+            "avg_pos_out": (
+                pitch.average_position_map(
+                    avg_pos["out_of_possession"][team], color,
+                    line_height["out_of_possession"][team], vertical=True,
+                ) if tracked_shapes else None
+            ),
         }
 
     context: dict[str, Any] = {
@@ -227,18 +313,34 @@ def build_context(impect_match_id: int, dvms_opta_match_id: str) -> dict[str, An
             for i, (r, o) in enumerate(zip(season.form, season.form_opponents))
         ],
         "stat_rows": _stat_rows(stats, impect_meta.home_team, impect_meta.away_team, charlton),
-        "territory_img": chart_dvms.territory_chart(wave, dvms_goal_markers, charlton, opponent),
+        "territory_img": territory_img,
+        "territory_is_tracked": territory_is_tracked,
+        "tracked_shapes": tracked_shapes,
+        "line_breaks_available": line_breaks_available,
+        "has_physical": has_physical,
         "chance_source_img": chart.chance_source_bars(chances, charlton, opponent),
         "contributions": _contribution_rows(contributions, charlton),
         "match_id": impect_match_id,
+        "dvms_match_id": dvms_fixture.opta_match_id if dvms_fixture else None,
+        "panel_sources": panel_sources,
+        "source_warnings": warnings,
     }
+    dvms_panels = (territory_is_tracked, tracked_shapes, line_breaks_available, has_physical,
+                   panel_sources["possession"] == "DVMS tracking")
+    context["report_mode"] = "combined" if all(dvms_panels) else ("mixed" if any(dvms_panels) else "impect")
+    context["source_summary"] = {
+        "combined": "IMPECT + Opta/Second Spectrum via DVMS",
+        "mixed": "IMPECT + partial DVMS enrichment",
+        "impect": "IMPECT fallback — DVMS unavailable",
+    }[context["report_mode"]]
     return context
 
 
-def render_report(impect_match_id: int, dvms_opta_match_id: str,
+def render_report(impect_match_id: int, dvms_opta_match_id: str | None = None,
                    output_dir: Path | str = DEFAULT_OUTPUT_DIR,
-                   formats: tuple[str, ...] = ("html", "pdf")) -> dict[str, Path]:
-    context = build_context(impect_match_id, dvms_opta_match_id)
+                   formats: tuple[str, ...] = ("html", "pdf"),
+                   force_impect_only: bool = False) -> dict[str, Path]:
+    context = build_context(impect_match_id, dvms_opta_match_id, force_impect_only)
 
     env = Environment(
         loader=FileSystemLoader(str(TEMPLATES_DIR)),
@@ -250,7 +352,7 @@ def render_report(impect_match_id: int, dvms_opta_match_id: str,
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    slug = (f"post_match_report_combined_{context['meta']['charlton_team']}"
+    slug = (f"post_match_report_{context['meta']['charlton_team']}"
             f"_v_{context['meta']['opponent_team']}"
             f"_{context['meta']['date'].replace('/', '-')}").replace(" ", "_")
 
@@ -266,3 +368,14 @@ def render_report(impect_match_id: int, dvms_opta_match_id: str,
         HTML(string=html, base_url=str(PROJECT_ROOT)).write_pdf(str(pdf_path))
         outputs["pdf"] = pdf_path
     return outputs
+
+
+def main() -> int:
+    """Allow ``python -m src.report.render_combined`` as the canonical CLI."""
+    from generate_report_combined import main as cli_main
+
+    return cli_main()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

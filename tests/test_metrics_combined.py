@@ -130,7 +130,7 @@ class _FakeDvmsMatchForContributions:
         return {"home": "home", "away": "away"}[team_id]
 
 
-def test_blended_player_contributions_ranks_by_composite_and_keeps_impect_columns():
+def test_player_contributions_rank_by_impect_xt_and_keep_physical_columns():
     impect_df = pd.DataFrame([
         {"playerName": "Alfie May", "squadName": "Charlton Athletic", "surname": "May",
          "passes": 20, "ground": 2, "aerial": 5, "ball_wins": 1, "shots": 3, "xg": 0.9, "xt": 0.30},
@@ -145,23 +145,22 @@ def test_blended_player_contributions_ranks_by_composite_and_keeps_impect_column
     with patch.object(metrics_combined.impect_metrics, "player_contributions", return_value=impect_df), \
          patch.object(metrics_combined.metrics_dvms, "player_contributions_dvms", return_value=dvms_df), \
          patch.object(metrics_combined.impect_metrics, "match_meta", return_value=_FakeMatchMeta()):
-        result = metrics_combined.blended_player_contributions(
+        result = metrics_combined.enriched_player_contributions(
             pd.DataFrame(), _FakeDvmsMatchForContributions(), top_n=10
         )
 
     assert list(result.columns[:9]) == [
         "playerName", "squadName", "surname", "passes", "ground", "aerial", "ball_wins", "shots", "xg",
-    ] or set(["playerName", "squadName", "surname", "passes", "ground", "aerial", "ball_wins", "shots", "xg", "xt", "composite"]) <= set(result.columns)
-    assert "composite" in result.columns
+    ]
     assert len(result) == 2
-    # composite is descending
-    assert result.iloc[0]["composite"] >= result.iloc[1]["composite"]
+    assert list(result["surname"]) == ["May", "Egbri"]
+    assert result["xt"].is_monotonic_decreasing
     # physical data attached to the right players
     may_row = result[result["surname"] == "May"].iloc[0]
     assert may_row["distance"] == 9500.0
 
 
-def test_blended_player_contributions_handles_unmatched_dvms_player():
+def test_player_contributions_handle_unmatched_dvms_player():
     impect_df = pd.DataFrame([
         {"playerName": "Alfie May", "squadName": "Charlton Athletic", "surname": "May",
          "passes": 20, "ground": 2, "aerial": 5, "ball_wins": 1, "shots": 3, "xg": 0.9, "xt": 0.30},
@@ -171,12 +170,13 @@ def test_blended_player_contributions_handles_unmatched_dvms_player():
     with patch.object(metrics_combined.impect_metrics, "player_contributions", return_value=impect_df), \
          patch.object(metrics_combined.metrics_dvms, "player_contributions_dvms", return_value=dvms_df), \
          patch.object(metrics_combined.impect_metrics, "match_meta", return_value=_FakeMatchMeta()):
-        result = metrics_combined.blended_player_contributions(
+        result = metrics_combined.enriched_player_contributions(
             pd.DataFrame(), _FakeDvmsMatchForContributions(), top_n=10
         )
 
     assert len(result) == 1
-    assert result.iloc[0]["composite"] == 0.0  # only component with any signal (xt) has zero std across n=1
+    assert result.iloc[0]["xt"] == 0.30
+    assert pd.isna(result.iloc[0]["sc_distance"])
 
 
 def test_blended_player_contributions_does_not_dupe_cross_squad_surname_collision():
@@ -197,7 +197,7 @@ def test_blended_player_contributions_does_not_dupe_cross_squad_surname_collisio
     with patch.object(metrics_combined.impect_metrics, "player_contributions", return_value=impect_df), \
          patch.object(metrics_combined.metrics_dvms, "player_contributions_dvms", return_value=dvms_df), \
          patch.object(metrics_combined.impect_metrics, "match_meta", return_value=_FakeMatchMeta()):
-        result = metrics_combined.blended_player_contributions(
+        result = metrics_combined.enriched_player_contributions(
             pd.DataFrame(), _FakeDvmsMatchForContributions(), top_n=10
         )
 
@@ -212,3 +212,29 @@ def test_blended_player_contributions_does_not_dupe_cross_squad_surname_collisio
     assert charlton_smith["top_speed"] == 31.2
     assert swansea_smith["distance"] == 12000.0
     assert swansea_smith["top_speed"] == 33.5
+
+
+def test_impect_only_contribution_order_matches_enriched_order():
+    impect_df = pd.DataFrame([
+        {"playerName": "A Two", "squadName": "Charlton Athletic", "surname": "Two",
+         "passes": 50, "ground": 0, "aerial": 0, "ball_wins": 0, "shots": 0, "xg": 0.0, "xt": 0.10},
+        {"playerName": "A One", "squadName": "Charlton Athletic", "surname": "One",
+         "passes": 2, "ground": 0, "aerial": 0, "ball_wins": 0, "shots": 1, "xg": 0.1, "xt": 0.40},
+    ])
+    with patch.object(metrics_combined.impect_metrics, "player_contributions", return_value=impect_df):
+        result = metrics_combined.enriched_player_contributions(pd.DataFrame(), None)
+    assert list(result["surname"]) == ["One", "Two"]
+    assert result["sc_minutes"].isna().all()
+
+
+def test_entry_effectiveness_uses_impect_success_and_positive_threat():
+    entries = pd.DataFrame({
+        "success": [True, False, True],
+        "threat": [0.12, -0.04, 0.08],
+    })
+    result = metrics_combined.entry_effectiveness(entries)
+    assert result == {
+        "total": 3, "successful": 2,
+        "completion_pct": pytest.approx(200 / 3),
+        "threat": pytest.approx(0.20),
+    }

@@ -144,8 +144,8 @@ body { font-family: var(--sans); color: var(--ink); background: #2b2a27; }
 .contrib .xt { flex: 0 0 6.0mm; text-align: right; font-variant-numeric: tabular-nums; font-weight: 800; }
 .contrib .p { flex: 0 0 6.0mm; text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
 
-.note { flex: 0 0 auto; text-align: center; font-size: 6.4px; line-height: 1.35; color: var(--faint); font-family: var(--serif-text); padding-top: 0.8mm; }
-.contrib + .note { margin-top: 1.4mm; padding-top: 1mm; border-top: 0.4px solid var(--hair-soft); }
+.note { flex: 0 0 auto; min-height: 5.8mm; text-align: center; font-size: 6.1px; line-height: 1.3; color: var(--faint); font-family: var(--serif-text); padding: 0.9mm 0 0.5mm; }
+.contrib + .note { margin-top: 0.8mm; border-top: 0.4px solid var(--hair-soft); }
 
 /* --------------------------------------------------------------------- FOOTER */
 .footer {
@@ -257,9 +257,13 @@ body { font-family: var(--sans); color: var(--ink); background: #2b2a27; }
   <!-- --------------------------------------- MOMENTUM + WHERE CHANCES CAME FROM -->
   <div class="row" style="flex: 1 1 48mm; min-height: 43mm;">
     <div class="panel">
-      <div class="panel-label"><span class="mark"></span>Territory (tracked)</div>
+      <div class="panel-label"><span class="mark"></span>{{ 'Territory (tracked)' if territory_is_tracked else 'Attacking momentum (event data)' }}</div>
       <div class="chartbox"><img src="{{ territory_img }}" alt=""></div>
-      <div class="note">Above the line = {{ meta.charlton_team }}, below = {{ meta.opponent_team }} &middot; rolling mean tracked ball position, in metres &middot; circles = goals &middot; from Second Spectrum tracking (via DVMS)</div>
+      {% if territory_is_tracked %}
+      <div class="note">Above the line = {{ meta.charlton_team }}, below = {{ meta.opponent_team }} &middot; rolling mean tracked ball position, in metres &middot; circles = goals &middot; Second Spectrum tracking via DVMS</div>
+      {% else %}
+      <div class="note">Above the line = {{ meta.charlton_team }}, below = {{ meta.opponent_team }} &middot; rolling five-minute net packing xT &middot; IMPECT events, not tracking</div>
+      {% endif %}
     </div>
     <div class="panel" style="flex: 0 0 54mm;">
       <div class="panel-label"><span class="mark"></span>Where the chances came from</div>
@@ -270,11 +274,12 @@ body { font-family: var(--sans); color: var(--ink); background: #2b2a27; }
   <!-- --------------------------------------------------- AVERAGE POSITIONS -->
   <div class="row" style="flex: 0 0 84mm;">
     <div class="panel">
-      <div class="panel-label"><span class="mark"></span>Average positions, all eleven starters (tracked)</div>
+      <div class="panel-label"><span class="mark"></span>{{ 'Average positions, all eleven starters (tracked)' if tracked_shapes else 'Average locations in possession (event data)' }}</div>
       <div class="panel-body">
         {% for s in sides %}
         <div class="half">
           <div class="cap {{ 'cha' if s.is_charlton else 'opp' }}">{{ s.team }}</div>
+          {% if tracked_shapes %}
           <div class="panel-body">
             <div class="half">
               <div class="cap" style="font-size: 7px;">In possession</div>
@@ -285,11 +290,18 @@ body { font-family: var(--sans); color: var(--ink); background: #2b2a27; }
               <div class="chartbox"><img src="{{ s.avg_pos_out }}" alt=""></div>
             </div>
           </div>
+          {% else %}
+          <div class="chartbox"><img src="{{ s.avg_pos_in }}" alt=""></div>
+          {% endif %}
         </div>
         {% endfor %}
       </div>
       <div class="key">
+        {% if tracked_shapes %}
         <span>Both attacking upfield &middot; every player's mean tracked position over all live frames of the phase (Second Spectrum 25fps tracking, via DVMS) &middot; dashed line = average defensive line height</span>
+        {% else %}
+        <span>Both attacking left to right &middot; mean location of each starter's IMPECT-tagged in-possession actions &middot; event locations, not tracking &middot; dashed line = event-derived back-line estimate</span>
+        {% endif %}
       </div>
     </div>
   </div>
@@ -304,9 +316,15 @@ body { font-family: var(--sans); color: var(--ink); background: #2b2a27; }
           <div class="cap {{ 'cha' if s.is_charlton else 'opp' }}">{{ s.team }}</div>
           <div class="chartbox"><img src="{{ s.entries }}" alt=""></div>
           <div class="shot-sum">
+            {% if line_breaks_available %}
             <b>{{ '%.0f'|format(s.entries_style_split.through) }}%</b> through &middot;
             <b>{{ '%.0f'|format(s.entries_style_split.over) }}%</b> over &middot;
             <b>{{ '%.0f'|format(s.entries_style_split.around) }}%</b> around
+            {% else %}
+            <b>{{ s.entries_style_split.successful }}/{{ s.entries_style_split.total }}</b> completed
+            ({{ '%.0f'|format(s.entries_style_split.completion_pct) }}%) &middot;
+            <b>{{ '%.2f'|format(s.entries_style_split.threat) }}</b> pXT
+            {% endif %}
           </div>
         </div>
         {% endfor %}
@@ -320,7 +338,7 @@ body { font-family: var(--sans); color: var(--ink); background: #2b2a27; }
         <span class="sep">|</span>
         <span>Attacking left to right</span>
         <span class="sep">|</span>
-        <span>Through/over/around = line-breaking passes (Opta/Second Spectrum tracking)</span>
+        <span>{% if line_breaks_available %}Through/over/around = line-breaking passes (Opta/Second Spectrum tracking){% else %}Completion and pXT = IMPECT entry effectiveness; no line-break style inferred{% endif %}</span>
       </div>
     </div>
 
@@ -329,14 +347,12 @@ body { font-family: var(--sans); color: var(--ink); background: #2b2a27; }
       <div class="contrib">
         <div class="hd">
           <span class="nm">Player</span>
-          <span class="p">Mins</span>
-          <span class="p">Dist</span>
+          {% if has_physical %}<span class="p">Mins</span>
+          <span class="p">TD</span>
           <span class="p">HSR</span>
-          <span class="p">Spr</span>
-          <span class="n">Passes</span>
+          <span class="p">SD</span>{% endif %}
           <span class="n">Grd</span>
           <span class="n">Air</span>
-          <span class="n">Recov</span>
           <span class="n">Shots</span>
           <span class="xg">xG</span>
           <span class="xt">xT</span>
@@ -344,26 +360,24 @@ body { font-family: var(--sans); color: var(--ink); background: #2b2a27; }
         {% for p in contributions %}
         <div class="rw">
           <span class="nm {{ 'cha' if p.is_charlton else 'opp' }}">{{ p.name }}</span>
-          <span class="p">{{ p.sc_minutes }}</span>
+          {% if has_physical %}<span class="p">{{ p.sc_minutes }}</span>
           <span class="p">{{ p.sc_distance_km }}</span>
           <span class="p">{{ p.sc_hsr }}</span>
-          <span class="p">{{ p.sc_sprint }}</span>
-          <span class="n">{{ p.passes }}</span>
+          <span class="p">{{ p.sc_sprint }}</span>{% endif %}
           <span class="n">{{ p.ground }}</span>
           <span class="n">{{ p.aerial }}</span>
-          <span class="n">{{ p.ball_wins }}</span>
           <span class="n">{{ p.shots }}</span>
           <span class="xg">{{ p.xg }}</span>
           <span class="xt {{ 'cha' if p.is_charlton else 'opp' }}">{{ p.xt }}</span>
         </div>
         {% endfor %}
       </div>
-      <div class="note">Mins/Dist/HSR/Spr = minutes played, distance (km), high-speed running distance (m), sprint distance (m), SkillCorner &middot; Grd / Air = ground / aerial duels won &middot; Recov = ball recoveries &middot; xT = packing expected threat</div>
+      <div class="note">Ranked by total IMPECT pXT. {% if has_physical %}Mins / TD / HSR / SD: minutes, total distance (km), high-speed running metres and sprint distance (m), from DVMS. {% endif %}Grd / Air: duels won.</div>
     </div>
   </div>
 
   <div class="footer">
-    <span>Data: IMPECT (via CAFC_DB) + Opta/Second Spectrum (via DVMS)</span>
+    <span>Data: {{ source_summary }}</span>
     <span><b>{{ meta.home_team }} v {{ meta.away_team }}</b>, {{ meta.date }}</span>
     <span>Generated {{ generated_date }}</span>
   </div>

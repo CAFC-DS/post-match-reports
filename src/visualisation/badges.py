@@ -18,6 +18,7 @@ BADGE_DIR = Path(__file__).resolve().parents[2] / "assets" / "badges"
 TEAM_BADGE_FILES: dict[str, str] = {
     "Charlton Athletic": "Charlton Logo.png",
     "Swansea City": "Swansea_City_A.F.C._logo.png",
+    "Derby County": "Derby_County_crest.svg.png",
 }
 
 

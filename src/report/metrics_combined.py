@@ -1,8 +1,7 @@
-"""Combines Impect and DVMS metrics into single, best-source-per-metric
-panels for the combined board post-match report. Reuses metrics.py
-(Impect) and metrics_dvms.py (DVMS) unmodified — this module only decides,
-per panel, which source's number to show and merges/reranks where a panel
-genuinely needs both.
+"""Provider selection for the canonical one-page post-match report.
+
+Impect is the analytical spine. DVMS may override tracking-specific values
+and enrich player rows, but must never change the Impect contribution order.
 """
 
 from __future__ import annotations
@@ -11,11 +10,10 @@ import pandas as pd
 
 from src.report import metrics as impect_metrics
 from src.report import metrics_dvms
-from src.report import skillcorner_source
 from src.dvms.metrics.line_breaks import line_breaking_passes
 
 
-def combined_team_stats(impect_events: pd.DataFrame, dvms_match) -> pd.DataFrame:
+def combined_team_stats(impect_events: pd.DataFrame, dvms_match=None) -> pd.DataFrame:
     """The 13-row match-stats table (metrics.STAT_ROWS / STAT_GLOSS,
     unmodified), with every value from Impect except ``possession_pct``,
     which comes from DVMS's tracked ball-touch share — the one row where
@@ -28,9 +26,22 @@ def combined_team_stats(impect_events: pd.DataFrame, dvms_match) -> pd.DataFrame
     home, away = meta.home_team, meta.away_team
     stats = impect_metrics.team_stats(impect_events, home, away).copy()
 
-    for side, team in (("home", home), ("away", away)):
-        stats.loc[team, "possession_pct"] = metrics_dvms.team_stat_values(dvms_match, side)["possession_pct"]
+    if dvms_match is not None:
+        for side, team in (("home", home), ("away", away)):
+            stats.loc[team, "possession_pct"] = metrics_dvms.team_stat_values(dvms_match, side)["possession_pct"]
     return stats
+
+
+def entry_effectiveness(entries: pd.DataFrame) -> dict[str, float | int]:
+    """Honest Impect fallback for the DVMS line-break classification."""
+    total = int(len(entries))
+    successful = int(entries["success"].fillna(False).sum()) if total else 0
+    return {
+        "total": total,
+        "successful": successful,
+        "completion_pct": successful / total * 100 if total else 0.0,
+        "threat": float(entries["threat"].fillna(0.0).clip(lower=0.0).sum()) if total else 0.0,
+    }
 
 
 def line_break_style_split(match, side: str) -> dict[str, float]:
@@ -70,9 +81,9 @@ def line_break_style_split(match, side: str) -> dict[str, float]:
     }
 
 
-def blended_player_contributions(impect_events: pd.DataFrame, dvms_match, top_n: int = 10) -> pd.DataFrame:
-    """Composite contribution ranking blending Impect on-ball value with
-    DVMS physical output.
+def enriched_player_contributions(impect_events: pd.DataFrame, dvms_match=None,
+                                  top_n: int = 10) -> pd.DataFrame:
+    """Rank by Impect xT and optionally attach DVMS physical output.
 
     Player identity is joined on ``(team, lower-cased surname)`` — there is
     no shared player id between Impect and Opta in this codebase (unlike
@@ -101,27 +112,21 @@ def blended_player_contributions(impect_events: pd.DataFrame, dvms_match, top_n:
     than fanning out to multiple rows, but the "wrong" of the two players
     may end up with the other's physical data. Not yet hit in practice.
 
-    Both source functions are called with a large top_n so the join has
-    the full squads to work with, not just each source's own top-10 cut —
-    re-ranking happens here, after blending, then the result is cut to
-    ``top_n``.
-
-    Composite = weighted sum of z-scored components: 40% Impect xT
-    (attacking value added, the same metric both existing reports already
-    rank by), 15% successful passes, 15% ground+aerial duels won, 10% xG,
-    10% distance covered, 10% top speed (the last two from DVMS Second
-    Spectrum physical data — the only components tracking-derived).
-    Weights are a starting point, expected to need visual tuning against
-    known matches; not treated as fixed science.
-
-    Also carries ``sc_minutes``/``sc_distance``/``sc_hsr``/``sc_sprint`` from SkillCorner
-    (``skillcorner_source.load_physical_summary``), joined the same way as
-    the DVMS physical columns. Display-only -- unlike ``distance``/
-    ``top_speed`` above, these do not feed ``composite``, since introducing a
-    second physical source into the ranking would double-count physical
-    output against the DVMS component already weighted in.
+    Physical values are display-only. Missing DVMS data yields the same rows
+    in the same order with nullable physical columns.
     """
     impect_all = impect_metrics.player_contributions(impect_events, top_n=1000)
+    physical_columns = ["minutes", "distance", "hsr", "sprinting", "top_speed"]
+    if dvms_match is None:
+        result = impect_all.copy()
+        for column in physical_columns:
+            result[column] = pd.NA
+        result["sc_minutes"] = pd.NA
+        result["sc_distance"] = pd.NA
+        result["sc_hsr"] = pd.NA
+        result["sc_sprint"] = pd.NA
+        return result.sort_values("xt", ascending=False).head(top_n).reset_index(drop=True)
+
     dvms_all = metrics_dvms.player_contributions_dvms(dvms_match, top_n=1000)
 
     meta = impect_metrics.match_meta(impect_events)
@@ -137,53 +142,26 @@ def blended_player_contributions(impect_events: pd.DataFrame, dvms_match, top_n:
         _name_key=dvms_all["name"].str.lower(),
     )
     dvms_all = dvms_all.drop_duplicates(subset=["_team_key", "_name_key"])
-    dvms_physical = dvms_all[["_team_key", "_name_key", "distance", "top_speed"]]
+    for column in physical_columns:
+        if column not in dvms_all:
+            dvms_all[column] = pd.NA
+    dvms_physical = dvms_all[["_team_key", "_name_key", *physical_columns]]
 
     merged = impect_all.merge(dvms_physical, on=["_team_key", "_name_key"], how="left")
 
-    # SkillCorner physical summary, joined on the same (team, surname)
-    # convention as the DVMS merge above. Named ``sc_*`` (not ``distance``/
-    # ``top_speed``) since those names are already taken by the DVMS Second
-    # Spectrum columns feeding the composite score below -- an unprefixed
-    # merge here would silently collide into ``distance_x``/``distance_y``.
-    # Display-only: these columns do not feed ``composite``.
-    sc_physical = skillcorner_source.load_physical_summary(
-        meta.kickoff.strftime("%Y-%m-%d"), meta.home_team, meta.away_team,
-    )
-    if not sc_physical.empty:
-        sc_physical = sc_physical.rename(
-            columns={
-                "minutes": "sc_minutes", "distance": "sc_distance",
-                "hsr_distance": "sc_hsr", "sprint_distance": "sc_sprint",
-            }
-        )
-        merged = merged.merge(
-            sc_physical[["_team_key", "_name_key", "sc_minutes", "sc_distance", "sc_hsr", "sc_sprint"]],
-            on=["_team_key", "_name_key"], how="left",
-        )
-    else:
-        merged["sc_minutes"] = pd.NA
-        merged["sc_distance"] = pd.NA
-        merged["sc_hsr"] = pd.NA
-        merged["sc_sprint"] = pd.NA
+    # Keep the established presentation names so the renderer does not need
+    # to know its source. Unlike the prior SkillCorner-only wiring, these
+    # values exist whenever the corresponding DVMS physical feed is present.
+    merged["sc_minutes"] = merged["minutes"]
+    merged["sc_distance"] = merged["distance"]
+    merged["sc_hsr"] = merged["hsr"]
+    merged["sc_sprint"] = merged["sprinting"]
 
     merged = merged.drop(columns=["_team_key", "_name_key"])
 
-    def _z(s: pd.Series) -> pd.Series:
-        std = s.std(ddof=0)
-        return (s - s.mean()) / std if std else pd.Series(0.0, index=s.index)
+    return merged.sort_values("xt", ascending=False).head(top_n).reset_index(drop=True)
 
-    dist_mean = merged["distance"].mean()
-    dist = merged["distance"].astype(float).fillna(dist_mean if not pd.isna(dist_mean) else 0)
-    speed_mean = merged["top_speed"].mean()
-    speed = merged["top_speed"].astype(float).fillna(speed_mean if not pd.isna(speed_mean) else 0)
 
-    merged["composite"] = (
-        0.40 * _z(merged["xt"])
-        + 0.15 * _z(merged["passes"])
-        + 0.15 * _z(merged["ground"] + merged["aerial"])
-        + 0.10 * _z(merged["xg"])
-        + 0.10 * _z(dist)
-        + 0.10 * _z(speed)
-    )
-    return merged.sort_values("composite", ascending=False).head(top_n).reset_index(drop=True)
+# Backwards-compatible import for callers outside this repository. Its
+# behaviour intentionally follows the new stable Impect ranking contract.
+blended_player_contributions = enriched_player_contributions

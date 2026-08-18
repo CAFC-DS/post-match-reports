@@ -68,6 +68,7 @@ class DvmsMatch:
     shape: dict           # side -> shape df
     avg_positions: dict   # side -> avg positions df
     events: pd.DataFrame  # play-period events with xg column added
+    issues: tuple[str, ...] = ()
 
     @property
     def charlton_is_home(self) -> bool:
@@ -94,20 +95,33 @@ def load_match(fixture: FixtureRef, env_path: str = ".env") -> DvmsMatch:
     f24 = parse_f24(assets.fetch_asset_text(fixture.fixture_id, fixture.opta_match_id, 20, env_path=env_path))
     f7 = parse_f7(assets.fetch_asset_text(fixture.fixture_id, fixture.opta_match_id, 21, env_path=env_path))
     meta = parse_ss_metadata(assets.fetch_asset_text(fixture.fixture_id, fixture.opta_match_id, 40, env_path=env_path))
-    physical = parse_physical_summary(
-        assets.fetch_asset_text(fixture.fixture_id, fixture.opta_match_id, 43, env_path=env_path))
+    issues: list[str] = []
+    try:
+        physical = parse_physical_summary(
+            assets.fetch_asset_text(fixture.fixture_id, fixture.opta_match_id, 43, env_path=env_path))
+    except Exception as exc:  # optional enrichment; report remains useful
+        physical = pd.DataFrame()
+        issues.append(f"physical: {exc}")
 
-    frames = load_artifact(fixture.opta_match_id, "frames_5hz.parquet")
-    phases = {s: load_artifact(fixture.opta_match_id, f"phases_{s}.parquet") for s in ("home", "away")}
-    shape = {s: load_artifact(fixture.opta_match_id, f"shape_{s}.parquet") for s in ("home", "away")}
-    avg = {s: load_artifact(fixture.opta_match_id, f"avg_positions_{s}.parquet") for s in ("home", "away")}
+    def optional_artifact(name: str) -> pd.DataFrame:
+        try:
+            return load_artifact(fixture.opta_match_id, name)
+        except Exception as exc:  # panel orchestration decides the fallback
+            issues.append(f"{name}: {exc}")
+            return pd.DataFrame()
+
+    frames = optional_artifact("frames_5hz.parquet")
+    phases = {s: optional_artifact(f"phases_{s}.parquet") for s in ("home", "away")}
+    shape = {s: optional_artifact(f"shape_{s}.parquet") for s in ("home", "away")}
+    avg = {s: optional_artifact(f"avg_positions_{s}.parquet") for s in ("home", "away")}
 
     events = f24.events[f24.events["period_id"].isin([1, 2, 3, 4])].copy()
     events["xg"] = add_xg(events, meta.pitch_length, meta.pitch_width)
 
     return DvmsMatch(fixture=fixture, f24=f24, f7=f7, meta=meta,
                      physical=physical, frames=frames, phases=phases,
-                     shape=shape, avg_positions=avg, events=events)
+                     shape=shape, avg_positions=avg, events=events,
+                     issues=tuple(issues))
 
 
 # --------------------------------------------------------------------------- #
@@ -403,7 +417,12 @@ def player_contributions_dvms(match: DvmsMatch, top_n: int = 10) -> pd.DataFrame
         team_id=("team_id", "first"),
     ).reset_index()
 
-    phys = match.physical[["opta_player_id", "distance", "top_speed"]]
+    # Second Spectrum physical summary (DVMS subtype 43).  Carry the running
+    # totals through to the combined report as well as the two fields used in
+    # its contribution ranking.
+    phys = match.physical[[
+        "opta_player_id", "minutes", "distance", "hsr", "sprinting", "top_speed",
+    ]]
     per = per.merge(phys, left_on="player_id", right_on="opta_player_id", how="left")
     per["name"] = per["player_id"].map(match.last_name)
     per["is_charlton"] = per["team_id"].map(
