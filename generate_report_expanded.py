@@ -17,7 +17,6 @@ def main() -> int:
     parser.add_argument("--impect-match-id", type=int, required=True)
     parser.add_argument("--dvms-match-id", help="optional DVMS/Opta match-id override")
     parser.add_argument("--output-dir", type=Path, default=Path("outputs"))
-    parser.add_argument("--refresh", action="store_true", help="refresh Impect source data")
     parser.add_argument("--yes", action="store_true", help="retained for CLI compatibility")
     args = parser.parse_args()
 
@@ -27,7 +26,7 @@ def main() -> int:
     from src.report.render_combined import FixtureMismatchError, _assert_same_fixture, render_report
 
     try:
-        events = impect_cafcdb_source.load_match_events(args.impect_match_id, refresh=args.refresh)
+        events = impect_cafcdb_source.load_match_events(args.impect_match_id)
         meta = metrics.match_meta(events)
         fixture = (
             resolve_fixture(args.dvms_match_id)
