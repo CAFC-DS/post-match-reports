@@ -24,7 +24,8 @@ def main() -> int:
     from src.dvms.loaders.fixtures import resolve_fixture, resolve_fixture_for_match
     from src.dvms.preprocess import is_preprocessed, preprocess_fixture
     from src.report import impect_cafcdb_source, metrics
-    from src.report.render_combined import FixtureMismatchError, _assert_same_fixture, render_report
+    from src.report.render_combined import FixtureMismatchError, _assert_same_fixture
+    from src.report.expanded.working import render_report
 
     try:
         events = impect_cafcdb_source.load_match_events(args.impect_match_id)
@@ -45,13 +46,6 @@ def main() -> int:
         preprocess_fixture(fixture.fixture_id, fixture.opta_match_id)
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    outputs = render_report(
-        args.impect_match_id,
-        fixture.opta_match_id,
-        output_dir=args.output_dir,
-        formats=("pdf",),
-    )
-    rendered = outputs["pdf"]
     def slug(value: str) -> str:
         return re.sub(r"[^A-Za-z0-9]+", "_", value).strip("_")
 
@@ -59,8 +53,8 @@ def main() -> int:
         f"expanded_analyst_report_{slug(meta.home_team)}_v_{slug(meta.away_team)}_"
         f"{meta.kickoff:%d-%m-%Y}.pdf"
     )
-    final_path = rendered.with_name(final_name)
-    rendered.replace(final_path)
+    final_path = args.output_dir / final_name
+    render_report(args.impect_match_id, fixture.opta_match_id, final_path)
     print(f"Wrote PDF: {final_path}")
     return 0
 
