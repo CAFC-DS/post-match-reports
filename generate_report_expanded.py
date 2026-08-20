@@ -8,6 +8,7 @@ final PDF is persisted; the HTML used for Chromium rendering remains in memory.
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from pathlib import Path
 
@@ -51,7 +52,13 @@ def main() -> int:
         formats=("pdf",),
     )
     rendered = outputs["pdf"]
-    final_name = rendered.name.replace("post_match_report_", "expanded_analyst_report_", 1)
+    def slug(value: str) -> str:
+        return re.sub(r"[^A-Za-z0-9]+", "_", value).strip("_")
+
+    final_name = (
+        f"expanded_analyst_report_{slug(meta.home_team)}_v_{slug(meta.away_team)}_"
+        f"{meta.kickoff:%d-%m-%Y}.pdf"
+    )
     final_path = rendered.with_name(final_name)
     rendered.replace(final_path)
     print(f"Wrote PDF: {final_path}")
