@@ -78,12 +78,13 @@ def build_context(impect_match_id: int, dvms_match_id: str | None = None) -> dic
         mt=max(.001,float(net.nodes["threat"].abs().max())) if not net.nodes.empty else .001
         networks[team]=pitch.passing_network_map(net,colors[team],mx,mt)
     flag=lambda name: pd.to_numeric(events[name],errors="coerce").fillna(0) if name in events else pd.Series(0,index=events.index)
-    pressures=events.loc[(events["squadName"]==subject) & (flag("PRESSURE_NUMBER")==1)]
-    ground=events.loc[(events["squadName"]==subject) & ((flag("WON_GROUND_DUELS")==1)|(flag("LOST_GROUND_DUELS")==1))]
-    aerial=events.loc[(events["squadName"]==subject) & ((flag("WON_AERIAL_DUELS")==1)|(flag("LOST_AERIAL_DUELS")==1))]
+    defensive_actions=events["action"].isin(["DUEL","INTERCEPTION","BLOCK","FOUL","CLEARANCE"])
+    pressures=events.loc[(events["squadName"]==subject) & defensive_actions]
+    ground=events.loc[(events["squadName"]==subject) & ((flag("WON_GROUND_DUELS")==1)|(events["action"]=="DUEL"))]
+    aerial=events.loc[(events["squadName"]==subject) & ((flag("WON_AERIAL_DUELS")==1)|(events["action"]=="HEADER"))]
     regains=events.loc[(events["squadName"]==subject) & (flag("BALL_WIN_NUMBER")==1)]
     second=events.loc[(events["squadName"]==subject) & ((flag("SECOND_BALL_WIN")==1)|(flag("SECOND_BALL_LOSS")==1))]
-    losses=events.loc[(events["squadName"]==subject) & (flag("BALL_LOSS_NUMBER")==1)]
+    losses=events.loc[(events["squadName"]==subject) & (events["result"]!="SUCCESS") & events["actionType"].isin(["PASS","DRIBBLE"])]
     players=events.loc[events["squadName"]==subject].groupby("playerName",dropna=True).agg(
         ground=("WON_GROUND_DUELS","sum"),aerial=("WON_AERIAL_DUELS","sum"),wins=("BALL_WIN_NUMBER","sum")
     ).sort_values(["ground","aerial"],ascending=False).head(12)
