@@ -178,6 +178,49 @@ def _pressure_activity(pressure_events: pd.DataFrame) -> tuple[str, dict[str, An
     return _uri(fig), kpis
 
 
+def _local_passing_network_map(net: "metrics.PassingNetwork", max_edge_passes: int,
+                                max_abs_threat: float, max_abs_edge_pxt: float) -> str:
+    """Report-local passing network chart: same underlying pitch-drawing
+    helpers as pitch.passing_network_map, but with initials labelled INSIDE
+    each node (white, bold, centred) instead of below it with a halo, a
+    diverging edge colour by pair threat instead of a flat colour, and no
+    baked-in 'Full match...' caption -- none of which the shared function
+    provides, and none of which should be added there since the canonical
+    one-page report doesn't use this chart at all (see RECOVERY_NOTES.md).
+    Matches recovery/reference/verified_original page 5's embedded chart
+    (xref 74) exactly: labels inside nodes, no caption in the image."""
+    pitch_obj, fig, ax = pitch._horizontal_pitch(figsize=(7.4, 5.0))
+
+    if not net.edges.empty:
+        ax_, ay_ = pitch._to_pitch(net.edges["ax"], net.edges["ay"])
+        bx_, by_ = pitch._to_pitch(net.edges["bx"], net.edges["by"])
+        edge_pxt = net.edges["pxt"] if "pxt" in net.edges.columns else pd.Series(0.0, index=net.edges.index)
+        edge_colors = pitch._threat_colors(edge_pxt, max_abs_edge_pxt) if max_abs_edge_pxt else \
+            [palette.MUTED] * len(net.edges)
+        for i in range(len(net.edges)):
+            n = int(net.edges["passes"].iloc[i])
+            frac = n / max_edge_passes if max_edge_passes else 0.0
+            ax.plot([ax_.iloc[i], bx_.iloc[i]], [ay_.iloc[i], by_.iloc[i]],
+                    color=edge_colors[i], linewidth=0.9 + 5.6 * frac, alpha=0.5 + 0.4 * frac,
+                    solid_capstyle="round", zorder=2)
+
+    nx, ny = pitch._to_pitch(net.nodes["x"], net.nodes["y"])
+    passes = net.nodes["passes"].to_numpy()
+    top = passes.max() if len(passes) else 1
+    sizes = 150 + 480 * (passes / top)
+    node_colors = pitch._threat_colors(net.nodes["threat"], max_abs_threat)
+    is_starter = net.nodes["is_starter"].to_numpy()
+    for mask, marker in ((is_starter, "o"), (~is_starter, "^")):
+        if not mask.any():
+            continue
+        pitch_obj.scatter(nx[mask], ny[mask], s=sizes[mask], color=node_colors[mask], marker=marker,
+                          edgecolors=palette.PAPER_2, linewidth=1.6, alpha=0.95, zorder=3, ax=ax)
+    for xi, yi, name in zip(nx, ny, net.nodes["surname"]):
+        ax.text(xi, yi, name, ha="center", va="center", zorder=5, fontsize=7.2,
+                fontweight="bold", color="white")
+    return pitch._fig_to_uri(fig)
+
+
 def _duel_location_map(duels: pd.DataFrame, team: str, duel_type: str) -> str:
     """Won/lost duel locations for one team, one duel type, on a full pitch
     -- green dot = won, red cross = lost, matching the reference's page 12
@@ -518,11 +561,20 @@ def _initials(name: str) -> str:
 
 def _starters_only_network(net: "metrics.PassingNetwork") -> "metrics.PassingNetwork":
     """Reference page 5's caption reads 'starting XI · shared match scales' —
-    the eleven who began the game, not the whole squad that touched the ball."""
+    the eleven who began the game, not the whole squad that touched the ball.
+    Also adds a per-edge 'pxt' column so the local passing-network chart can
+    colour edges by threat, matching the reference legend's 'Link Colour =
+    Pair Passing Threat' -- metrics.passing_network's edges DataFrame has no
+    pair-level threat sum today, and deriving one properly means re-tracing
+    the underlying pass events, which is out of scope here; edges render at
+    the diverging scale's neutral midpoint until that's built (known
+    simplification, not a silent gap)."""
     starter_names = set(net.nodes.loc[net.nodes["is_starter"], "playerName"])
     nodes = net.nodes.loc[net.nodes["playerName"].isin(starter_names)].copy()
     nodes["surname"] = nodes["playerName"].map(_initials)
     edges = net.edges.loc[net.edges["a"].isin(starter_names) & net.edges["b"].isin(starter_names)].copy()
+    if not edges.empty and "pxt" not in edges.columns:
+        edges["pxt"] = 0.0
     return metrics.PassingNetwork(nodes, edges, net.first_sub_minute, net.total_passes)
 
 
@@ -597,7 +649,9 @@ def build_context(impect_match_id: int, dvms_match_id: str | None = None) -> dic
     nets={team:_starters_only_network(metrics.passing_network(events,team)) for team in teams}
     mx=max([int(n.edges["passes"].max()) for n in nets.values() if len(n.edges)] or [1])
     mt=max([float(n.nodes["threat"].abs().max()) for n in nets.values() if len(n.nodes)] or [.001])
-    networks={team:pitch.passing_network_map(nets[team],palette.MUTED,mx,mt) for team in teams}
+    met=max([float(n.edges["pxt"].abs().max()) for n in nets.values() if len(n.edges)] or [.001])
+    networks={team:_local_passing_network_map(nets[team],mx,mt,met) for team in teams}
+    network_scale_threat=round(mt,2)
     regain_img,regain_kpis,recovery_top6=_regains_panel(events,subject)
     second_ball_img,second_ball_kpis=_second_ball_panel(events,subject)
 
@@ -621,7 +675,7 @@ def build_context(impect_match_id: int, dvms_match_id: str | None = None) -> dic
     context.update({
         "generated_date":dt.date.today().strftime("%d %B %Y"),
         "subject":subject,"opponent":opponent,"team_order":teams,"side_by_team":side_by_team,
-        "network":networks,
+        "network":networks,"network_scale_threat":network_scale_threat,
         "stat_rows_expanded":stat_rows_expanded,
         "performance_img":_performance_wheel(charlton_match_values,baseline),
         "match_highlights":_match_highlights(charlton_match_values,baseline,subject,opponent,speed_subject,speed_opponent),
