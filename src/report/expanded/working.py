@@ -245,6 +245,22 @@ def _duel_location_map(duels: pd.DataFrame, team: str, duel_type: str) -> str:
     return _uri(fig)
 
 
+def _entries_kpis(events: pd.DataFrame, team: str) -> dict[str, Any]:
+    """Final-third/box entry counts for the caption under the entries map --
+    reuses metrics.zone_entries (already powering the map image itself via
+    render_combined's build_context) rather than adding a new data source."""
+    entries = metrics.zone_entries(events, team)
+    n = len(entries)
+    completed = int(entries["success"].sum()) if n else 0
+    return {
+        "n": n,
+        "completed": completed,
+        "completed_pct": round(completed / n * 100) if n else 0,
+        "final_third": int((entries["endPitchPosition"] == "FINAL_THIRD").sum()) if n else 0,
+        "box": int((entries["endPitchPosition"] == "OPPONENT_BOX").sum()) if n else 0,
+    }
+
+
 def _regains_panel(events: pd.DataFrame, team: str) -> tuple[str, dict[str, Any], pd.Series]:
     """Opposition-half ball wins, ringed where the team shot within 15s of
     winning it -- *and* kept the ball the whole way there (no opponent
@@ -675,6 +691,7 @@ def build_context(impect_match_id: int, dvms_match_id: str | None = None) -> dic
     speed_subject=_transition_speed_mps(events,subject,dvms_match)
     speed_opponent=_transition_speed_mps(events,opponent,dvms_match)
     threat_img,threat_pxt,threat_actions=_threat_heatmap(events,subject)
+    entries_kpis=_entries_kpis(events,subject)
     pressure_img,pressure_kpis=_pressure_activity(pressure_events.loc[pressure_events["squadName"]==subject])
     transition_img,transition_kpis=_transition_response_map(events,subject,opponent)
     context.update({
@@ -686,6 +703,7 @@ def build_context(impect_match_id: int, dvms_match_id: str | None = None) -> dic
         "match_highlights":_match_highlights(charlton_match_values,baseline,subject,opponent,speed_subject,speed_opponent),
         "xg_race_img":_xg_race(events,teams),
         "threat_img":threat_img,"threat_pxt":threat_pxt,"threat_actions":threat_actions,
+        "entries_kpis":entries_kpis,
         "pressure_img":pressure_img,"pressure_kpis":pressure_kpis,
         "ground_duel_img":_duel_location_map(duel_involvement,subject,"GROUND"),
         "aerial_duel_img":_duel_location_map(duel_involvement,subject,"AERIAL"),
