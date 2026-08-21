@@ -42,7 +42,7 @@ _KPI_FIELDS = [
     "SHOT_XG", "PACKING_XG", "POSTSHOT_XG", "PXT_ATTACK", "PXT_PASS",
     "SUCCESSFUL_PASSES", "UNSUCCESSFUL_PASSES",
     "WON_GROUND_DUELS", "WON_AERIAL_DUELS", "LOST_GROUND_DUELS", "LOST_AERIAL_DUELS",
-    "BALL_WIN_NUMBER", "SECOND_BALL_WIN",
+    "BALL_WIN_NUMBER", "SECOND_BALL_WIN", "SECOND_BALL_START",
     "OFFENSIVE_TOUCHES",
     "SHOT_AT_GOAL_NUMBER", "SHOT_AT_GOAL_NUMBER_ON_TARGET",
     "SHOT_AT_GOAL_NUMBER_SUCCESS", "SHOT_AT_GOAL_NUMBER_BLOCKED",
@@ -184,6 +184,55 @@ def load_match_events(match_id: int, env_path: str = ".env") -> pd.DataFrame:
 _DUEL_KPI_FIELDS = ["WON_AERIAL_DUELS", "WON_GROUND_DUELS", "LOST_AERIAL_DUELS", "LOST_GROUND_DUELS"]
 
 
+def load_pressure_events(match_id: int, player_lookup: pd.DataFrame, env_path: str = ".env") -> pd.DataFrame:
+    """One row per individual pressing action: a defender closing down
+    whoever was on the ball, at that ball-carrier's location.
+
+    Same shape of gap as duels: pressure is recorded as a second entry in
+    the *ball carrier's own* event KPI array (``NUMBER_OF_PRESSES``), keyed
+    by the presser's playerId, not as a defensive event of its own --
+    ``load_match_events``'s one-entry-per-row flattening only reads the
+    row's own acting player and drops this entirely. Location is the ball
+    carrier's start coordinates on that event (adjusted to the *carrier's*
+    attacking direction) -- the caller is responsible for rotating into the
+    pressing team's own attacking frame before plotting or computing
+    territory, exactly as the working single-team event maps already note.
+    """
+    connector = SnowflakeConnector(env_path)
+    with connector.connection() as conn:
+        cur = conn.cursor()
+        cur.execute(f"USE ROLE {DEV_ROLE}")
+        cur.execute(f"USE WAREHOUSE {DEV_WAREHOUSE}")
+        cur.execute(
+            "select EVENT_ID, EVENT_KPIS, "
+            "START_DETAIL:adjCoordinates.x::float as X, START_DETAIL:adjCoordinates.y::float as Y "
+            "from CAFC_DB.IMPECT_RAW.EVENTS "
+            "where MATCH_ID = %(match_id)s and EVENT_KPIS like '%%NUMBER_OF_PRESSES%%'",
+            {"match_id": match_id},
+        )
+        event_rows = cur.fetchall()
+
+    lookup = player_lookup.set_index("playerId")
+    records = []
+    for event_id, kpi_json, x, y in event_rows:
+        if not kpi_json:
+            continue
+        for entry in json.loads(kpi_json):
+            player_id = entry.get("playerId")
+            if player_id is None or player_id not in lookup.index or not entry.get("NUMBER_OF_PRESSES"):
+                continue
+            records.append({
+                "eventId": event_id,
+                "playerId": player_id,
+                "playerName": lookup.at[player_id, "playerName"],
+                "squadName": lookup.at[player_id, "squadName"],
+                "startAdjCoordinatesX": x,
+                "startAdjCoordinatesY": y,
+            })
+    return pd.DataFrame(records, columns=["eventId", "playerId", "playerName", "squadName",
+                                           "startAdjCoordinatesX", "startAdjCoordinatesY"])
+
+
 def load_duel_involvement(match_id: int, player_lookup: pd.DataFrame, env_path: str = ".env") -> pd.DataFrame:
     """One row per player per duel outcome (won/lost, aerial/ground).
 
@@ -208,15 +257,17 @@ def load_duel_involvement(match_id: int, player_lookup: pd.DataFrame, env_path: 
         cur.execute(f"USE ROLE {DEV_ROLE}")
         cur.execute(f"USE WAREHOUSE {DEV_WAREHOUSE}")
         cur.execute(
-            "select EVENT_ID, EVENT_KPIS from CAFC_DB.IMPECT_RAW.EVENTS "
-            "where MATCH_ID = %(match_id)s and EVENT_KPIS is not null",
+            "select EVENT_ID, EVENT_KPIS, "
+            "START_DETAIL:adjCoordinates.x::float as X, START_DETAIL:adjCoordinates.y::float as Y "
+            "from CAFC_DB.IMPECT_RAW.EVENTS "
+            "where MATCH_ID = %(match_id)s and (EVENT_KPIS like '%%_DUELS%%')",
             {"match_id": match_id},
         )
         event_rows = cur.fetchall()
 
     lookup = player_lookup.set_index("playerId")
     records = []
-    for event_id, kpi_json in event_rows:
+    for event_id, kpi_json, x, y in event_rows:
         if not kpi_json:
             continue
         for entry in json.loads(kpi_json):
@@ -232,5 +283,8 @@ def load_duel_involvement(match_id: int, player_lookup: pd.DataFrame, env_path: 
                         "squadName": lookup.at[player_id, "squadName"],
                         "duel_type": field.split("_", 1)[1].replace("_DUELS", ""),
                         "outcome": field.split("_", 1)[0],
+                        "startAdjCoordinatesX": x,
+                        "startAdjCoordinatesY": y,
                     })
-    return pd.DataFrame(records, columns=["eventId", "playerId", "playerName", "squadName", "duel_type", "outcome"])
+    return pd.DataFrame(records, columns=["eventId", "playerId", "playerName", "squadName", "duel_type",
+                                           "outcome", "startAdjCoordinatesX", "startAdjCoordinatesY"])

@@ -149,30 +149,75 @@ best-effort, documented, and should be treated as approximate)
   treat the *ranking* logic (best/worst percentile) as validated and this
   one number as the remaining open item.
 
-### Not yet done (pages not substantially reworked this session)
-Pages 9, 10, 12, 14, 16 still use the prior session's simpler chart
-functions (`_event_map`, `_threat_heatmap`) rather than the reference's
-richer, KPI-annotated versions:
-- **Page 9** (Threat Creation): reference's "Threat Density Map" is a
-  smooth jet-colormap heatmap with a "2.57 positive PXT Attack · 470
-  actions" caption; current is a coarse 10×14-bin `hist2d`. Entries panel
-  (`side_by_team[subject].entries`) already reuses the real
-  `pitch.entry_map` and should be close.
-- **Page 12** (Pressure Activity & Duel Performance): reference has a full
-  jet-colormap pressure heatmap with a 4-cell KPI strip underneath
-  (opposition-half share / opposition-third pressures / median intensity /
-  top presser) and won/lost-marker duel-location maps with a "most
-  involved" caption. Current `_event_map` is a bare scatter plot with none
-  of that. No `pressure_heatmap` or duel-location function exists anywhere
-  in the codebase to reuse — this needs new chart code, following the same
-  pattern used for `_duel_bars_by_type` (query `EVENT_KPIS` array entries
-  properly rather than the flattened one-entry-per-row events table, since
-  pressure "intensity" and duel location/outcome likely have the same
-  loser-is-a-second-array-entry issue found on page 13).
-- **Page 14** (Regains & Second Balls): similar gap — reference has KPI
-  strips with season-baseline deltas; current is bare scatter maps.
-- **Page 16** (Defensive Transition): reference likely has a similarly
-  richer map/KPI treatment; not compared in detail this session.
+### Session 2: pages 9, 10, 12, 13 (duel bars), 14, 16
+
+All of the pages flagged as "not yet done" at the end of session 1 were
+reworked this session, following the same pattern that worked for page 13:
+find the real KPI field in `EVENT_KPIS` (often in a *second* array entry,
+not the row's own acting player), extract it properly, and validate the
+result against the reference PDF's own printed numbers.
+
+- **Page 9** (`_threat_heatmap`): rebuilt as a smoothed (gaussian-filtered)
+  `mplsoccer` bin-statistic heatmap on a real pitch, replacing a coarse,
+  unmarked 10×14-bin `hist2d`. **Validated exactly**: caption reads "2.57
+  positive PXT Attack · 470 actions", identical to the reference.
+- **Page 12** (`_pressure_activity`, new `impect_cafcdb_source.
+  load_pressure_events`): pressure activity (`NUMBER_OF_PRESSES`) is not a
+  defensive event of its own — it's a second entry in the *ball carrier's*
+  own KPI array, keyed by the presser's playerId, exactly the same shape of
+  gap as the page-13 duel-loser fix. Built a real jet-colormap heatmap plus
+  the KPI strip. **Validated exactly**: opposition-half share 47%,
+  opposition-third pressures 41, top presser "Grant · 23" all match the
+  reference precisely. "Median intensity" has no equivalent field anywhere
+  in the KPI catalogue and is shown as "—" rather than guessed.
+- **Page 12 duel maps** (`_duel_location_map`): won/lost location dots
+  using the same `load_duel_involvement` data page 13 already validated.
+- **Page 10**: "Biggest Chances" now uses the real shot category
+  (Goal/On target/Blocked/Off target) instead of raw pass/fail, top-7
+  instead of top-5, matching the reference's row count.
+- **Page 14** (`_regains_panel`, `_second_ball_panel`): found and fixed a
+  real bug — "Opposition-Half Regains" had no half filter at all (it was
+  every ball win anywhere on the pitch), and "Player Recoveries" summed the
+  same unfiltered count. **Validated exactly**: n=50 regains matches the
+  reference's "50 · avg 49.3" precisely, and the Player Recoveries bar
+  chart (McNamara 10, Bell 8, Campbell 6, Grant 5, Coventry 5, Carey 4)
+  matches the reference row-for-row. Second-ball wins needed real forensic
+  work: there is no `SECOND_BALL_LOSS` field anywhere in the KPI catalogue;
+  the reference's own "39 of 88" turned out to be the *union* of this
+  team's `SECOND_BALL_START` events (56) and `SECOND_BALL_WIN` events (39)
+  — validated by literally reproducing 39/88 = 44%, byte-for-byte matching
+  the reference's own caption. The "led to a shot within 15s" percentage on
+  this page (22% vs. reference 16%, both off an exactly-matching n=50) is
+  the one number here still not fully resolved — likely because the
+  reference requires the shot to come from an *unbroken* possession after
+  the regain, not just any shot within the time window; not chased further
+  this session.
+- **Page 16** (`_transition_response_map`): same missing-half-filter bug as
+  page 14 — "high losses" needs `startAdjCoordinatesX > 0` (attacking
+  half), which the prior version didn't apply at all. **Validated exactly**
+  on the "led to opponent shot" numbers: this fixture is 0 / 0%, matching
+  the reference precisely, a clean edge case. High-losses count (64 vs.
+  reference 76) and counter-press-regains count (14 vs. reference 58) are
+  both still off — the counter-press figure in particular is far enough
+  off that the definition is probably wrong, not just imprecise (tried two
+  different window/half combinations, neither reproduced 58); flagged as
+  open rather than silently accepted.
+- **Both heatmaps' pitch outlines** were initially invisible — technically
+  drawn (patch count doubled) but in the same pale tone as the heatmap
+  cells' own edge colour, so effectively camouflaged. Fixed by drawing
+  these two charts' pitches with a bolder, dedicated line colour
+  (`_heatmap_pitch_kwargs`) instead of the shared `pitch.py` styling, which
+  stays untouched for every other chart.
+
+Net effect: of the numbers checked against the reference PDF's own printed
+captions this session (page 9's 2.57/470, page 12's 47%/41/Grant·23, page
+13's full duel table, page 14's regains n=50 and the full Player Recoveries
+table, page 14's second-ball 39/88/44%, page 16's 0/0%), **every one now
+matches exactly**. The remaining open items (page 14's shot-window
+percentage, page 16's high-losses and counter-press counts, the page-2
+transition-speed formula) are the ones that were checked and found not to
+match — they are called out above rather than left for a reader to
+discover by re-deriving them.
 
 `src/report/expanded/render.py` and `src/report/expanded/metrics/` (three
 files) are **non-functional dead code** from the prior session — `render.py`
@@ -211,8 +256,17 @@ trap that looks like real infrastructure.
   unrelated to this work).
 - Full 16-page pixel-diff against the reference, before and after each
   major change, plus manual visual inspection of every page listed above.
-- Page 13's duel-performance numbers cross-checked player-by-player and
-  matched the reference exactly after the fix.
+  Note: raw pixel-diff percentage is a poor fidelity proxy here — several
+  pages that became substantially more *correct* (real KPI strips, real
+  chart types replacing broken ones) show a similar or higher diff % than
+  before, because a correct chart in a different exact colour/layout style
+  than the reference still diffs on every pixel it touches. Treat the
+  per-number validations above as the real signal, not the diff %.
+- Page 13's duel-performance numbers, page 9's threat-density caption,
+  page 12's pressure KPIs, page 14's regains count and Player Recoveries
+  table, page 14's second-ball 39/88/44%, and page 16's 0/0% led-to-shot
+  rate were all cross-checked directly against the reference PDF's own
+  printed numbers and matched exactly.
 
 ## How to regenerate
 

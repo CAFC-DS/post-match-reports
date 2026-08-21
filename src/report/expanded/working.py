@@ -12,10 +12,21 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from jinja2 import Environment, FileSystemLoader, select_autoescape
+from mplsoccer import Pitch, VerticalPitch
+from scipy.ndimage import gaussian_filter
 
 from src.report import impect_cafcdb_source, metrics, palette, pitch
 from src.report.render_combined import build_context as build_shared_context
 from src.report.expanded import season_baseline as sb
+
+
+def _heatmap_pitch_kwargs() -> dict:
+    """A bolder line colour than pitch.py's shared _pitch_kwargs (palette.HAIR,
+    a pale tan) -- against a busy turbo-colormap heatmap the shared colour is
+    nearly invisible next to the heatmap cells' own cream edgecolors."""
+    return dict(pitch_type="custom", pitch_length=105.0, pitch_width=68.0,
+                pitch_color=palette.PAPER_2, line_color=palette.INK, linewidth=1.1,
+                line_zorder=3, goal_type="line")
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 TEMPLATES_DIR = Path(__file__).with_name("templates")
@@ -130,6 +141,151 @@ def _event_map(frame: pd.DataFrame, color: str, title: str = "") -> str:
         ax.scatter(x,y,s=24,c=color,alpha=.58,edgecolors=palette.PAPER,lw=.35)
     if title: ax.set_title(title,fontsize=9,fontweight="bold",color=palette.INK)
     return _uri(fig)
+
+
+def _pressure_activity(pressure_events: pd.DataFrame) -> tuple[str, dict[str, Any]]:
+    """Full-pitch pressure-density heatmap plus the KPI strip underneath it.
+
+    ``pressure_events`` rows are located at the ball carrier's own adjusted
+    coordinates (the carrier being pressed, not the presser), so they run in
+    the *opponent's* attacking direction. Negate both axes to express them
+    in the pressing team's own attacking frame before plotting or deriving
+    territory share, matching the convention already used by the working
+    single-team event maps elsewhere in this module.
+    """
+    x = -pd.to_numeric(pressure_events["startAdjCoordinatesX"], errors="coerce")
+    y = -pd.to_numeric(pressure_events["startAdjCoordinatesY"], errors="coerce")
+    pitch_obj = Pitch(pad_top=1, pad_bottom=1, pad_left=1, pad_right=1, **_heatmap_pitch_kwargs())
+    fig, ax = pitch_obj.draw(figsize=(8.8, 5.7))
+    fig.set_facecolor(palette.PAPER_2)
+    px, py = pitch._to_pitch(x, y)
+    bin_stat = pitch_obj.bin_statistic(px, py, statistic="count", bins=(12, 8))
+    bin_stat["statistic"] = gaussian_filter(bin_stat["statistic"], 1)
+    pitch_obj.heatmap(bin_stat, ax=ax, cmap="turbo", edgecolors=palette.PAPER_2, alpha=0.8, zorder=1)
+
+    top = pressure_events.groupby("playerName").size().sort_values(ascending=False)
+    kpis = {
+        "pressure_n": len(pressure_events),
+        "opp_half_pct": round(float((x > 0).mean() * 100)) if len(x) else 0,
+        "opp_third_n": int((x > 17.5).sum()),
+        "top_name": str(top.index[0]).split()[-1] if len(top) else "—",
+        "top_n": int(top.iloc[0]) if len(top) else 0,
+    }
+    return _uri(fig), kpis
+
+
+def _duel_location_map(duels: pd.DataFrame, team: str, duel_type: str) -> str:
+    """Won/lost duel locations for one team, one duel type, on a full pitch
+    -- green dot = won, red cross = lost, matching the reference's page 12
+    legend. Coordinates come straight from load_duel_involvement, adjusted
+    to whichever player originally acted on that event (usually but not
+    always this team's own attacking direction) -- a documented
+    simplification, not a recovered original convention."""
+    t = duels.loc[(duels["squadName"] == team) & (duels["duel_type"] == duel_type)]
+    pitch_obj, fig, ax = pitch._vertical_pitch((5.0, 7.4))
+    won = t.loc[t["outcome"] == "WON"]
+    lost = t.loc[t["outcome"] == "LOST"]
+    for frame, marker, color in ((won, "o", palette.SUCCESS_GREEN), (lost, "X", palette.FAIL_REDGREY)):
+        if frame.empty: continue
+        x, y = pitch._to_pitch(frame["startAdjCoordinatesX"], frame["startAdjCoordinatesY"])
+        pitch_obj.scatter(x, y, ax=ax, s=46, color=color, marker=marker,
+                           edgecolors=palette.PAPER_2, linewidth=0.8, alpha=0.9, zorder=3)
+    return _uri(fig)
+
+
+def _regains_panel(events: pd.DataFrame, team: str) -> tuple[str, dict[str, Any], pd.Series]:
+    """Opposition-half ball wins, ringed where the team shot within 15s of
+    winning it. The prior version had no half filter at all -- 'opposition-
+    half regains' was actually every ball win anywhere on the pitch."""
+    t = events.loc[events["squadName"] == team].sort_values("gameTimeInSec")
+    flag = lambda name: pd.to_numeric(t.get(name, 0), errors="coerce").fillna(0)
+    regains = t.loc[(flag("BALL_WIN_NUMBER") == 1) & (pd.to_numeric(t["startAdjCoordinatesX"], errors="coerce") > 0)]
+    shot_times = t.loc[flag("SHOT_AT_GOAL_NUMBER") == 1, "gameTimeInSec"].to_numpy()
+
+    def led_to_shot(rt: float) -> bool:
+        window = shot_times[(shot_times >= rt) & (shot_times <= rt + 15)]
+        return len(window) > 0
+
+    led = regains["gameTimeInSec"].map(led_to_shot) if len(regains) else pd.Series(dtype=bool)
+    pitch_obj, fig, ax = pitch._vertical_pitch((5.6, 7.4))
+    x, y = pitch._to_pitch(regains["startAdjCoordinatesX"], regains["startAdjCoordinatesY"])
+    pitch_obj.scatter(x, y, ax=ax, s=32, color=palette.CHARLTON_RED, alpha=0.75, zorder=2)
+    if led.any():
+        rx, ry = pitch._to_pitch(regains.loc[led, "startAdjCoordinatesX"], regains.loc[led, "startAdjCoordinatesY"])
+        pitch_obj.scatter(rx, ry, ax=ax, s=90, facecolors="none", edgecolors=palette.CHARLTON_RED, linewidth=1.6, zorder=3)
+    n = len(regains)
+    kpis = {"n": n, "shot_n": int(led.sum()) if n else 0, "shot_pct": round(int(led.sum()) / n * 100) if n else 0}
+    top6 = regains.groupby("playerName").size().sort_values(ascending=False).head(6)
+    top6.index = [str(i).split()[-1] for i in top6.index]
+    return _uri(fig), kpis, top6
+
+
+def _second_ball_panel(events: pd.DataFrame, team: str) -> tuple[str, dict[str, Any]]:
+    """Second-ball contests this team was involved in, as the union of the
+    events where they started the contest (SECOND_BALL_START) and where
+    they won it (SECOND_BALL_WIN) -- these are separate events, sometimes
+    with a different acting player, and a team can win a contest it didn't
+    register as starting. Validated exactly against the reference fixture:
+    union = 88 events, wins = 39, 39/88 = 44%, matching the reference's own
+    '39 of 88 · 44%' caption precisely."""
+    t = events.loc[events["squadName"] == team].sort_values("gameTimeInSec")
+    flag = lambda name: pd.to_numeric(t.get(name, 0), errors="coerce").fillna(0)
+    started, won = t.loc[flag("SECOND_BALL_START") == 1], t.loc[flag("SECOND_BALL_WIN") == 1]
+    contests = pd.concat([started, won]).drop_duplicates("eventId")
+    won_ids = set(won["eventId"])
+    won_mask = contests["eventId"].isin(won_ids)
+
+    pitch_obj, fig, ax = pitch._vertical_pitch((7.2, 5.6))
+    for mask, marker, color in ((won_mask, "o", palette.SUCCESS_GREEN), (~won_mask, "X", palette.FAIL_REDGREY)):
+        frame = contests.loc[mask]
+        if frame.empty: continue
+        x, y = pitch._to_pitch(frame["startAdjCoordinatesX"], frame["startAdjCoordinatesY"])
+        pitch_obj.scatter(x, y, ax=ax, s=42, color=color, marker=marker, edgecolors=palette.PAPER_2, linewidth=0.8, alpha=0.9, zorder=2)
+    n = len(contests)
+    kpis = {"n": n, "won_n": len(won_ids), "won_pct": round(len(won_ids) / n * 100) if n else 0}
+    return _uri(fig), kpis
+
+
+def _transition_response_map(events: pd.DataFrame, team: str, opponent: str) -> tuple[str, dict[str, Any]]:
+    """High losses (attacking-half turnovers) plotted with two overlays:
+    a black ring where the opponent shot within 15s, a green triangle where
+    the team won the ball back within 5s (counter-pressed it). The prior
+    version's 'losses' had no attacking-half filter at all, matching every
+    failed pass/dribble anywhere on the pitch."""
+    t = events.loc[events["squadName"] == team].sort_values("gameTimeInSec")
+    o = events.loc[events["squadName"] == opponent]
+    high_losses = t.loc[
+        (t["result"] != "SUCCESS") & t["actionType"].isin(["PASS", "DRIBBLE"])
+        & (pd.to_numeric(t["startAdjCoordinatesX"], errors="coerce") > 0)
+    ]
+    opp_shot_times = o.loc[pd.to_numeric(o.get("SHOT_AT_GOAL_NUMBER", 0), errors="coerce") == 1, "gameTimeInSec"].to_numpy()
+    team_regain_times = t.loc[pd.to_numeric(t.get("BALL_WIN_NUMBER", 0), errors="coerce") == 1, "gameTimeInSec"].to_numpy()
+
+    def within(rt: float, times: np.ndarray, window: float) -> bool:
+        return bool(len(times[(times > rt) & (times <= rt + window)]))
+
+    led_to_shot = high_losses["gameTimeInSec"].map(lambda rt: within(rt, opp_shot_times, 15))
+    counter_pressed = high_losses["gameTimeInSec"].map(lambda rt: within(rt, team_regain_times, 5))
+
+    pitch_obj, fig, ax = pitch._horizontal_pitch((11.5, 7.4))
+    x, y = pitch._to_pitch(high_losses["startAdjCoordinatesX"], high_losses["startAdjCoordinatesY"])
+    pitch_obj.scatter(x, y, ax=ax, s=44, color=palette.FAIL_REDGREY, alpha=0.85, zorder=2)
+    if counter_pressed.any():
+        cx, cy = pitch._to_pitch(high_losses.loc[counter_pressed, "startAdjCoordinatesX"], high_losses.loc[counter_pressed, "startAdjCoordinatesY"])
+        pitch_obj.scatter(cx, cy, ax=ax, s=60, color=palette.SUCCESS_GREEN, marker="^", edgecolors=palette.PAPER_2, linewidth=0.6, zorder=3)
+    if led_to_shot.any():
+        sx, sy = pitch._to_pitch(high_losses.loc[led_to_shot, "startAdjCoordinatesX"], high_losses.loc[led_to_shot, "startAdjCoordinatesY"])
+        pitch_obj.scatter(sx, sy, ax=ax, s=110, facecolors="none", edgecolors=palette.INK, linewidth=1.4, zorder=4)
+
+    n = len(high_losses)
+    shot_n = int(led_to_shot.sum())
+    kpis = {
+        "high_losses_n": n,
+        "counterpress_n": int(counter_pressed.sum()),
+        "shot_n": shot_n,
+        "shot_pct": round(shot_n / n * 100) if n else 0,
+    }
+    return _uri(fig), kpis
 
 
 def _bars(labels: list[str], values: list[float], color: str) -> str:
@@ -261,12 +417,20 @@ def _xg_race(events: pd.DataFrame, teams: list[str]) -> str:
     return _uri(fig)
 
 
-def _threat_heatmap(events: pd.DataFrame, team: str) -> str:
-    t=events.loc[(events["squadName"]==team)&(events["PXT_ATTACK"]>0)]
-    fig,ax=plt.subplots(figsize=(5.2,6.5),facecolor=palette.PAPER)
-    ax.hist2d(t["startAdjCoordinatesY"],t["startAdjCoordinatesX"],bins=(10,14),weights=t["PXT_ATTACK"],cmap="Spectral_r")
-    ax.set_xlim(-34,34); ax.set_ylim(-52.5,52.5); ax.set_aspect("equal"); ax.axis("off")
-    return _uri(fig)
+def _threat_heatmap(events: pd.DataFrame, team: str) -> tuple[str, float, int]:
+    """Smoothed threat-density heatmap on the shared vertical pitch (was a
+    coarse 10x14-bin hist2d with no pitch markings at all). Returns the
+    image plus the two summary numbers the reference captions the panel
+    with ('X positive PXT Attack · Y actions')."""
+    t = events.loc[(events["squadName"] == team) & events["PXT_ATTACK"].notna() & (events["PXT_ATTACK"] > 0)]
+    pitch_obj = VerticalPitch(pad_top=1, pad_bottom=1, pad_left=1, pad_right=1, **_heatmap_pitch_kwargs())
+    fig, ax = pitch_obj.draw(figsize=(5.2, 7.4))
+    fig.set_facecolor(palette.PAPER_2)
+    x, y = pitch._to_pitch(t["startAdjCoordinatesX"], t["startAdjCoordinatesY"])
+    bin_stat = pitch_obj.bin_statistic(x, y, values=t["PXT_ATTACK"], statistic="sum", bins=(9, 12))
+    bin_stat["statistic"] = gaussian_filter(bin_stat["statistic"], 1)
+    pitch_obj.heatmap(bin_stat, ax=ax, cmap="turbo", edgecolors=palette.PAPER_2, alpha=0.8, zorder=1)
+    return _uri(fig), round(float(t["PXT_ATTACK"].sum()), 2), len(t)
 
 
 def _infer_pass_receivers(events: pd.DataFrame) -> pd.DataFrame:
@@ -330,26 +494,17 @@ def build_context(impect_match_id: int, dvms_match_id: str | None = None) -> dic
     events=_infer_pass_receivers(events)
     player_lookup=events.loc[events["playerName"].notna(), ["playerId","playerName","squadName"]].drop_duplicates("playerId")
     duel_involvement=impect_cafcdb_source.load_duel_involvement(impect_match_id,player_lookup)
+    pressure_events=impect_cafcdb_source.load_pressure_events(impect_match_id,player_lookup)
     subject=context["meta"]["charlton_team"]
     opponent=context["meta"]["opponent_team"]
     teams=[subject,opponent]
     side_by_team={s["team"]:s for s in context["sides"]}
-    colors={subject:palette.CHARLTON_RED,opponent:palette.OPPONENT_GREY}
     nets={team:_starters_only_network(metrics.passing_network(events,team)) for team in teams}
     mx=max([int(n.edges["passes"].max()) for n in nets.values() if len(n.edges)] or [1])
     mt=max([float(n.nodes["threat"].abs().max()) for n in nets.values() if len(n.nodes)] or [.001])
     networks={team:pitch.passing_network_map(nets[team],palette.MUTED,mx,mt) for team in teams}
-    flag=lambda name: pd.to_numeric(events[name],errors="coerce").fillna(0) if name in events else pd.Series(0,index=events.index)
-    defensive_actions=events["action"].isin(["DUEL","INTERCEPTION","BLOCK","FOUL","CLEARANCE"])
-    pressures=events.loc[(events["squadName"]==subject) & defensive_actions]
-    ground=events.loc[(events["squadName"]==subject) & ((flag("WON_GROUND_DUELS")==1)|(events["action"]=="DUEL"))]
-    aerial=events.loc[(events["squadName"]==subject) & ((flag("WON_AERIAL_DUELS")==1)|(events["action"]=="HEADER"))]
-    regains=events.loc[(events["squadName"]==subject) & (flag("BALL_WIN_NUMBER")==1)]
-    second=events.loc[(events["squadName"]==subject) & ((flag("SECOND_BALL_WIN")==1)|(flag("SECOND_BALL_LOSS")==1))]
-    losses=events.loc[(events["squadName"]==subject) & (events["result"]!="SUCCESS") & events["actionType"].isin(["PASS","DRIBBLE"])]
-    players=events.loc[events["squadName"]==subject].groupby("playerName",dropna=True).agg(
-        ground=("WON_GROUND_DUELS","sum"),aerial=("WON_AERIAL_DUELS","sum"),wins=("BALL_WIN_NUMBER","sum")
-    ).sort_values(["ground","aerial"],ascending=False).head(12)
+    regain_img,regain_kpis,recovery_top6=_regains_panel(events,subject)
+    second_ball_img,second_ball_kpis=_second_ball_panel(events,subject)
 
     home,away=context["meta"]["home_team"],context["meta"]["away_team"]
     team_stats=metrics.team_stats(events,home,away)
@@ -365,6 +520,9 @@ def build_context(impect_match_id: int, dvms_match_id: str | None = None) -> dic
     charlton_match_values=sb.match_metrics(events,subject,opponent)
     speed_subject=_transition_speed_mps(events,subject)
     speed_opponent=_transition_speed_mps(events,opponent)
+    threat_img,threat_pxt,threat_actions=_threat_heatmap(events,subject)
+    pressure_img,pressure_kpis=_pressure_activity(pressure_events.loc[pressure_events["squadName"]==subject])
+    transition_img,transition_kpis=_transition_response_map(events,subject,opponent)
     context.update({
         "generated_date":dt.date.today().strftime("%d %B %Y"),
         "subject":subject,"opponent":opponent,"team_order":teams,"side_by_team":side_by_team,
@@ -373,19 +531,19 @@ def build_context(impect_match_id: int, dvms_match_id: str | None = None) -> dic
         "performance_img":_performance_wheel(charlton_match_values,baseline),
         "match_highlights":_match_highlights(charlton_match_values,baseline,subject,opponent,speed_subject,speed_opponent),
         "xg_race_img":_xg_race(events,teams),
-        "threat_img":_threat_heatmap(events,subject),
-        "pressure_img":_event_map(pressures,colors[subject]),
-        "ground_duel_img":_event_map(ground,colors[subject]),
-        "aerial_duel_img":_event_map(aerial,colors[subject]),
-        "regain_img":_event_map(regains,colors[subject]),
-        "second_ball_img":_event_map(second,palette.SUCCESS_GREEN),
-        "transition_img":_event_map(losses,colors[subject]),
+        "threat_img":threat_img,"threat_pxt":threat_pxt,"threat_actions":threat_actions,
+        "pressure_img":pressure_img,"pressure_kpis":pressure_kpis,
+        "ground_duel_img":_duel_location_map(duel_involvement,subject,"GROUND"),
+        "aerial_duel_img":_duel_location_map(duel_involvement,subject,"AERIAL"),
+        "regain_img":regain_img,"regain_kpis":regain_kpis,
+        "second_ball_img":second_ball_img,"second_ball_kpis":second_ball_kpis,
+        "transition_img":transition_img,"transition_kpis":transition_kpis,
         "duel_aerial_bars_img":_duel_bars_by_type(duel_involvement,subject,opponent,"AERIAL"),
         "duel_ground_bars_img":_duel_bars_by_type(duel_involvement,subject,opponent,"GROUND"),
-        "recovery_player_img":_bars([str(x).split()[-1] for x in players.index],players.wins.tolist(),palette.SUCCESS_GREEN),
-        "event_counts":{"pressures":len(pressures),"regains":len(regains),"second_balls":len(second),"losses":len(losses)},
+        "recovery_player_img":_bars(recovery_top6.index.tolist(),recovery_top6.values.tolist(),palette.CHARLTON_RED),
+        "event_counts":{"pressures":pressure_kpis["pressure_n"],"regains":regain_kpis["n"],"second_balls":second_ball_kpis["n"],"losses":transition_kpis["high_losses_n"]},
         "big_chances":{
-            team:[{"minute":str(r.gameTime).split(':')[0]+"'","player":str(r.playerName).split()[-1],"xg":float(r.SHOT_XG),"result":str(r.result)} for r in metrics.shot_events(events).loc[lambda x:x.squadName==team].nlargest(5,"SHOT_XG").itertuples()]
+            team:[{"minute":str(r.gameTime).split(':')[0]+"'","player":str(r.playerName).split()[-1],"xg":float(r.SHOT_XG),"result":str(r.category).upper()} for r in metrics.shot_events(events).loc[lambda x:x.squadName==team].nlargest(7,"SHOT_XG").itertuples()]
             for team in teams
         },
     })
