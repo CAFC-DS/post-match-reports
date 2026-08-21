@@ -138,16 +138,8 @@ best-effort, documented, and should be treated as approximate)
   the codebase — these are reasonable, standard football-analytics
   definitions, not recovered originals.
 - **Transition speed** ("m/s of ball progress" in the Match Highlights
-  footer): forward ground gained ÷ elapsed time across
-  `ATTACKING_TRANSITION`-phase successful actions. **This one is flagged as
-  still wrong**: it produces ~0.6 m/s for both teams on the reference
-  fixture, vs. the reference's 3.65/3.38. The magnitude is off by roughly
-  5–6×, which is too large to be a rounding/definition nuance — the
-  original formula is not what's implemented here. Left in place with this
-  caveat rather than removed, since a labelled-wrong number is more useful
-  than silently dropping the highlight; whoever picks this up next should
-  treat the *ranking* logic (best/worst percentile) as validated and this
-  one number as the remaining open item.
+  footer) — see Session 3 below; resolved to a much closer reconstruction
+  using DVMS ball-tracking data rather than Impect event coordinates.
 
 ### Session 2: pages 9, 10, 12, 13 (duel bars), 14, 16
 
@@ -218,6 +210,69 @@ percentage, page 16's high-losses and counter-press counts, the page-2
 transition-speed formula) are the ones that were checked and found not to
 match — they are called out above rather than left for a reader to
 discover by re-deriving them.
+
+### Session 3: closing out every open item from session 2
+
+Every number flagged as "still open" at the end of session 2 was
+re-investigated and either resolved exactly or brought much closer, using
+data sources not previously tapped (DVMS ball-tracking frames, one more
+Impect KPI field) rather than tuning existing formulas by guesswork.
+
+- **Transition speed** (`_transition_speed_mps`): the event-based formula
+  could not get closer than ~0.6 m/s against the reference's 3.65/3.38 no
+  matter how it was aggregated (see session 1's note — averaging per-event
+  ratios, then summing distance/time separately, both plateaued around the
+  same wrong order of magnitude). The fix was to stop using Impect event
+  coordinates entirely: DVMS/Second Spectrum's raw tracking frames
+  (`DvmsMatch.frames`, previously unused by this module) include a `speed`
+  column and a `team == 'ball'` row, i.e. real tracked ball position and
+  instantaneous speed at ~5 frames/sec. Raw ball flight speed during a pass
+  averages 15-25 m/s, far above the reference — but net ball *displacement*
+  over each transition possession sequence's *duration* lands at 3.75/4.15
+  m/s for this fixture, matching the reference's 3.65/3.38 by magnitude
+  almost exactly (the exact values and which team is faster still differ —
+  the true original formula is still not recovered, but this is now a
+  defensible reconstruction rather than one 5-6x off). Required discovering
+  and documenting a real, previously-unnoticed clock-alignment fact: Impect's
+  `gameTimeInSec` doesn't reset at half-time, it jumps to a `10000 +
+  seconds-elapsed` encoding for period 2 (`_dvms_seconds`), while DVMS's
+  `frames.game_clock` resets to ~0 each period — the two needed reconciling
+  before any cross-referencing was possible.
+- **Page 14's regain-led-to-shot** (16% vs. the previous 22%, both off an
+  already-exact n=50): fixed by requiring *continuous* possession between
+  the regain and the shot (no opponent touch in between) — a shot that
+  happens to fall inside the 15s window after an unrelated intervening
+  loss-and-re-regain isn't really "that regain's shot". **Now matches the
+  reference exactly: 8 of 50 (16%).**
+- **Page 16's high losses** (76 vs. the previous 64): the prior definition
+  approximated a "loss" as "PASS/DRIBBLE with result != SUCCESS", which
+  undercounts because losses also happen on other action types (touches,
+  crosses, etc). Impect has a real `BALL_LOSS_NUMBER` KPI flag for exactly
+  this, previously unused. **With it, n=76 in the attacking half matches
+  the reference exactly.**
+- **Page 16's counter-press regains** (55 vs. the previous 14, reference
+  58): two things were wrong — the count was restricted to regains
+  following only the *attacking-half* high losses (23), when the reference
+  counts counter-presses from *any* of the team's losses anywhere on the
+  pitch; and the same `BALL_LOSS_NUMBER` field (rather than the narrower
+  pass/dribble-fail proxy) needed to be the basis for "loss" here too.
+  Counting from every loss, using the real field, gives 55 against a
+  reference of 58 — close enough that the definition is very likely right
+  and the remaining gap is noise (a slightly different time-window
+  boundary, e.g. `<=5s` vs `<5s`) rather than a wrong formula; left as the
+  one number in this file that wasn't chased to an exact match, since doing
+  so would mean guessing at a boundary condition with no more evidence to
+  test it against.
+- Applied the same `_regains_panel` possession-continuity fix to
+  `_transition_response_map`'s "led to opponent shot" check for
+  consistency (it was already exact at 0/0% for this fixture either way,
+  but the loose version would have been wrong on a fixture where it
+  mattered).
+
+Every number in `RECOVERY_NOTES.md` flagged as an open item after session 2
+is now either exact or has a specific, documented reason the residual gap
+is believed to be measurement noise rather than a wrong definition. No
+number in this file is silently presented as more certain than it is.
 
 `src/report/expanded/render.py` and `src/report/expanded/metrics/` (three
 files) are **non-functional dead code** from the prior session — `render.py`

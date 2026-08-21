@@ -195,16 +195,27 @@ def _duel_location_map(duels: pd.DataFrame, team: str, duel_type: str) -> str:
 
 def _regains_panel(events: pd.DataFrame, team: str) -> tuple[str, dict[str, Any], pd.Series]:
     """Opposition-half ball wins, ringed where the team shot within 15s of
-    winning it. The prior version had no half filter at all -- 'opposition-
-    half regains' was actually every ball win anywhere on the pitch."""
+    winning it -- *and* kept the ball the whole way there (no opponent
+    touch between the regain and the shot). Without the continuity check
+    this over-counted (11 of 50 vs. the reference's 8 of 50): a shot that
+    happens to fall inside the 15s window after an unrelated, intervening
+    loss-and-re-regain isn't really that regain's shot. With it, n=8
+    matches the reference exactly. The prior version also had no half
+    filter at all -- 'opposition-half regains' was actually every ball win
+    anywhere on the pitch."""
     t = events.loc[events["squadName"] == team].sort_values("gameTimeInSec")
     flag = lambda name: pd.to_numeric(t.get(name, 0), errors="coerce").fillna(0)
     regains = t.loc[(flag("BALL_WIN_NUMBER") == 1) & (pd.to_numeric(t["startAdjCoordinatesX"], errors="coerce") > 0)]
     shot_times = t.loc[flag("SHOT_AT_GOAL_NUMBER") == 1, "gameTimeInSec"].to_numpy()
+    all_sorted = events.sort_values("gameTimeInSec")
 
     def led_to_shot(rt: float) -> bool:
         window = shot_times[(shot_times >= rt) & (shot_times <= rt + 15)]
-        return len(window) > 0
+        if not len(window):
+            return False
+        shot_t = window[0]
+        between = all_sorted.loc[(all_sorted["gameTimeInSec"] > rt) & (all_sorted["gameTimeInSec"] < shot_t)]
+        return not (between["squadName"] != team).any()
 
     led = regains["gameTimeInSec"].map(led_to_shot) if len(regains) else pd.Series(dtype=bool)
     pitch_obj, fig, ax = pitch._vertical_pitch((5.6, 7.4))
@@ -248,40 +259,66 @@ def _second_ball_panel(events: pd.DataFrame, team: str) -> tuple[str, dict[str, 
 
 def _transition_response_map(events: pd.DataFrame, team: str, opponent: str) -> tuple[str, dict[str, Any]]:
     """High losses (attacking-half turnovers) plotted with two overlays:
-    a black ring where the opponent shot within 15s, a green triangle where
-    the team won the ball back within 5s (counter-pressed it). The prior
-    version's 'losses' had no attacking-half filter at all, matching every
-    failed pass/dribble anywhere on the pitch."""
+    a black ring where the opponent shot within 15s of that specific loss
+    (with no opponent touch in between -- see _regains_panel for why that
+    continuity check matters), and a green triangle at the *regain's own
+    location* for every one of the team's losses -- not just the high
+    ones -- that the team won back within 5s.
+
+    Two real fixes from the prior version, both validated against the
+    reference's own printed numbers for this fixture:
+    1. 'High loss' now uses the BALL_LOSS_NUMBER KPI flag instead of a
+       hand-rolled 'result != SUCCESS on a PASS/DRIBBLE' proxy, which
+       undercounted (64 vs the reference's 76 -- BALL_LOSS_NUMBER also
+       fires on other action types, e.g. failed touches/crosses). n=76
+       with BALL_LOSS_NUMBER matches exactly.
+    2. Counter-press regains are counted from *all* of the team's losses,
+       not just the attacking-half subset plotted as red dots, and plotted
+       at the regain's location rather than assumed to sit on top of a
+       high-loss dot. Restricting to high-loss-only regains gave 23 against
+       a reference of 58; counting from every loss gives 55 -- close enough
+       to treat as the right definition, with the remaining gap left open
+       rather than tuned further to hit the number exactly."""
     t = events.loc[events["squadName"] == team].sort_values("gameTimeInSec")
     o = events.loc[events["squadName"] == opponent]
-    high_losses = t.loc[
-        (t["result"] != "SUCCESS") & t["actionType"].isin(["PASS", "DRIBBLE"])
-        & (pd.to_numeric(t["startAdjCoordinatesX"], errors="coerce") > 0)
-    ]
+    loss_flag = pd.to_numeric(t.get("BALL_LOSS_NUMBER", 0), errors="coerce") == 1
+    high_losses = t.loc[loss_flag & (pd.to_numeric(t["startAdjCoordinatesX"], errors="coerce") > 0)]
+    all_losses = t.loc[loss_flag]
     opp_shot_times = o.loc[pd.to_numeric(o.get("SHOT_AT_GOAL_NUMBER", 0), errors="coerce") == 1, "gameTimeInSec"].to_numpy()
-    team_regain_times = t.loc[pd.to_numeric(t.get("BALL_WIN_NUMBER", 0), errors="coerce") == 1, "gameTimeInSec"].to_numpy()
+    regains = t.loc[pd.to_numeric(t.get("BALL_WIN_NUMBER", 0), errors="coerce") == 1]
+    all_sorted = events.sort_values("gameTimeInSec")
 
-    def within(rt: float, times: np.ndarray, window: float) -> bool:
-        return bool(len(times[(times > rt) & (times <= rt + window)]))
+    def led_to_shot(rt: float) -> bool:
+        window = opp_shot_times[(opp_shot_times > rt) & (opp_shot_times <= rt + 15)]
+        if not len(window):
+            return False
+        shot_t = window[0]
+        between = all_sorted.loc[(all_sorted["gameTimeInSec"] > rt) & (all_sorted["gameTimeInSec"] < shot_t)]
+        return not (between["squadName"] != opponent).any()
 
-    led_to_shot = high_losses["gameTimeInSec"].map(lambda rt: within(rt, opp_shot_times, 15))
-    counter_pressed = high_losses["gameTimeInSec"].map(lambda rt: within(rt, team_regain_times, 5))
+    def counter_pressing_regain(loss_t: float) -> pd.Series | None:
+        window = regains.loc[(regains["gameTimeInSec"] > loss_t) & (regains["gameTimeInSec"] <= loss_t + 5)]
+        return window.iloc[0] if len(window) else None
+
+    led_to_shot_mask = high_losses["gameTimeInSec"].map(led_to_shot)
+    counter_press_regains = [r for r in all_losses["gameTimeInSec"].map(counter_pressing_regain) if r is not None]
 
     pitch_obj, fig, ax = pitch._horizontal_pitch((11.5, 7.4))
     x, y = pitch._to_pitch(high_losses["startAdjCoordinatesX"], high_losses["startAdjCoordinatesY"])
     pitch_obj.scatter(x, y, ax=ax, s=44, color=palette.FAIL_REDGREY, alpha=0.85, zorder=2)
-    if counter_pressed.any():
-        cx, cy = pitch._to_pitch(high_losses.loc[counter_pressed, "startAdjCoordinatesX"], high_losses.loc[counter_pressed, "startAdjCoordinatesY"])
+    if counter_press_regains:
+        cframe = pd.DataFrame(counter_press_regains)
+        cx, cy = pitch._to_pitch(cframe["startAdjCoordinatesX"], cframe["startAdjCoordinatesY"])
         pitch_obj.scatter(cx, cy, ax=ax, s=60, color=palette.SUCCESS_GREEN, marker="^", edgecolors=palette.PAPER_2, linewidth=0.6, zorder=3)
-    if led_to_shot.any():
-        sx, sy = pitch._to_pitch(high_losses.loc[led_to_shot, "startAdjCoordinatesX"], high_losses.loc[led_to_shot, "startAdjCoordinatesY"])
+    if led_to_shot_mask.any():
+        sx, sy = pitch._to_pitch(high_losses.loc[led_to_shot_mask, "startAdjCoordinatesX"], high_losses.loc[led_to_shot_mask, "startAdjCoordinatesY"])
         pitch_obj.scatter(sx, sy, ax=ax, s=110, facecolors="none", edgecolors=palette.INK, linewidth=1.4, zorder=4)
 
     n = len(high_losses)
-    shot_n = int(led_to_shot.sum())
+    shot_n = int(led_to_shot_mask.sum())
     kpis = {
         "high_losses_n": n,
-        "counterpress_n": int(counter_pressed.sum()),
+        "counterpress_n": len(counter_press_regains),
         "shot_n": shot_n,
         "shot_pct": round(shot_n / n * 100) if n else 0,
     }
@@ -466,30 +503,65 @@ def _starters_only_network(net: "metrics.PassingNetwork") -> "metrics.PassingNet
     return metrics.PassingNetwork(nodes, edges, net.first_sub_minute, net.total_passes)
 
 
-def _transition_speed_mps(events: pd.DataFrame, team: str) -> float:
-    """Mean forward ground gained per second of elapsed time across the
-    team's ATTACKING_TRANSITION-phase passes/dribbles -- 'how fast the team
-    moved the ball upfield in transition', the reconstructed reading of the
-    reference's 'm/s of ball progress' footer stat (no surviving formula, so
-    this is a documented best-effort definition, not a recovered original)."""
+def _dvms_seconds(row: pd.Series) -> float:
+    """Impect's gameTimeInSec is a period-1 seconds-elapsed clock for
+    periodId 1, but jumps to a 10000+seconds-elapsed encoding for periodId
+    2 (e.g. '45:00.0000' -> 10000.0) rather than continuing or resetting --
+    confirmed empirically against this fixture's own event log. DVMS/Second
+    Spectrum's frames.game_clock resets to ~0 at the start of each period,
+    so period 2 needs the 10000 offset removed to align the two clocks."""
+    return float(row["gameTimeInSec"]) if row["periodId"] == 1 else float(row["gameTimeInSec"]) - 10000.0
+
+
+def _transition_speed_mps(events: pd.DataFrame, team: str, dvms_match) -> float:
+    """Net ball-tracking displacement per second of elapsed time, across
+    each of the team's ATTACKING_TRANSITION-phase possession sequences
+    (consecutive transition events with the same team). 'Ball progress' is
+    read as net progress (displacement over the whole sequence), not the
+    ball's raw instantaneous flight speed -- a passing sequence's ball
+    speed while airborne is 15-25 m/s, far above the reference's ~3-4 m/s,
+    while this sequence-level definition lands in the same range as the
+    reference's own 3.65/3.38 for this fixture. Still a reconstruction, not
+    a recovered original formula -- validated by magnitude, not derivation.
+    """
+    if dvms_match is None:
+        return 0.0
+    ball = dvms_match.frames.loc[dvms_match.frames["team"] == "ball"].sort_values(["period", "game_clock"])
     t = events.loc[
         (events["squadName"] == team) & (events["phase"] == "ATTACKING_TRANSITION")
         & events["actionType"].isin(["PASS", "DRIBBLE"]) & (events["result"] == "SUCCESS")
-    ].sort_values("gameTimeInSec")
+    ].copy()
     if t.empty:
         return 0.0
-    gained = (pd.to_numeric(t["endAdjCoordinatesX"], errors="coerce")
-              - pd.to_numeric(t["startAdjCoordinatesX"], errors="coerce")).clip(lower=0)
-    dt_s = t["gameTimeInSec"].diff().clip(upper=15).fillna(1.0).clip(lower=0.5)
-    # Total ground gained over total elapsed time, not a mean of per-event
-    # ratios -- averaging (gained/dt) directly overweights the many short,
-    # low-gain events between transition bursts and understates the actual
-    # pace of the bursts themselves.
-    return float(gained.sum() / dt_s.sum()) if dt_s.sum() else 0.0
+    t["t"] = t.apply(_dvms_seconds, axis=1)
+    t = t.sort_values(["periodId", "t"])
+    # A gap of more than 6s between transition-tagged actions ends one
+    # transition burst and starts the next.
+    gap = t.groupby("periodId")["t"].diff()
+    seq = (gap.isna() | (gap > 6)).cumsum()
+
+    total_gain, total_time = 0.0, 0.0
+    for _, grp in t.groupby(seq):
+        period, t0, t1 = grp["periodId"].iloc[0], grp["t"].min(), grp["t"].max()
+        if t1 <= t0:
+            continue
+        before = ball.loc[(ball["period"] == period) & (ball["game_clock"] <= t0)].tail(1)
+        after = ball.loc[(ball["period"] == period) & (ball["game_clock"] >= t1)].head(1)
+        if before.empty or after.empty:
+            continue
+        dist = float(np.hypot(after["x"].iloc[0] - before["x"].iloc[0], after["y"].iloc[0] - before["y"].iloc[0]))
+        total_gain += dist
+        total_time += (t1 - t0)
+    return total_gain / total_time if total_time else 0.0
 
 
 def build_context(impect_match_id: int, dvms_match_id: str | None = None) -> dict[str, Any]:
     context=build_shared_context(impect_match_id,dvms_match_id)
+    dvms_match=None
+    if dvms_match_id:
+        from src.dvms.loaders.fixtures import resolve_fixture
+        from src.report import metrics_dvms
+        dvms_match=metrics_dvms.load_match(resolve_fixture(dvms_match_id))
     events=impect_cafcdb_source.load_match_events(impect_match_id)
     events=_infer_pass_receivers(events)
     player_lookup=events.loc[events["playerName"].notna(), ["playerId","playerName","squadName"]].drop_duplicates("playerId")
@@ -518,8 +590,8 @@ def build_context(impect_match_id: int, dvms_match_id: str | None = None) -> dic
     # duels_won, opponent_half_regains vs opposition_half_regains -- so two
     # of twelve wedges silently read 0.0 every time).
     charlton_match_values=sb.match_metrics(events,subject,opponent)
-    speed_subject=_transition_speed_mps(events,subject)
-    speed_opponent=_transition_speed_mps(events,opponent)
+    speed_subject=_transition_speed_mps(events,subject,dvms_match)
+    speed_opponent=_transition_speed_mps(events,opponent,dvms_match)
     threat_img,threat_pxt,threat_actions=_threat_heatmap(events,subject)
     pressure_img,pressure_kpis=_pressure_activity(pressure_events.loc[pressure_events["squadName"]==subject])
     transition_img,transition_kpis=_transition_response_map(events,subject,opponent)
