@@ -119,6 +119,10 @@ _PERFORMANCE_WHEEL_METRICS: list[tuple[str, str, str, bool]] = [
     ("defend", "counter_press_regains", "Counter-press regains", True),
 ]
 _WHEEL_COLORS = {"attack": palette.CHARLTON_RED, "possession": "#b5892a", "defend": "#4a4a46"}
+# Pale tints of the same three hues, sampled from the reference wheel's own
+# unfilled-wedge background (recovery/reference/verified_original page 2,
+# embedded raster xref 56) -- not a uniform grey for every category.
+_WHEEL_BG_COLORS = {"attack": "#f0cdc9", "possession": "#e8d5ae", "defend": "#c9c6c1"}
 
 
 def _uri(fig) -> str:
@@ -380,12 +384,16 @@ def _duel_bars_by_type(duels: pd.DataFrame, charlton: str, opponent: str, duel_t
 def _performance_wheel(match_values: dict[str, float], baseline: pd.DataFrame) -> str:
     """Percentile-vs-season wheel: each wedge is this match's percentile rank
     of that metric within Charlton's 25/26 season distribution, coloured by
-    Attacking / Possession-Progression / Defending."""
+    Attacking / Possession-Progression / Defending. Styling (pale per-category
+    background, donut-hole centre, dashed gridlines, pill-badge value labels)
+    matches the reference wheel exactly (recovery/reference/verified_original
+    page 2, embedded raster xref 56) rather than the placeholder uniform-grey
+    background and floating labels this function started with."""
     metrics_list = _PERFORMANCE_WHEEL_METRICS
     n = len(metrics_list)
     theta = np.linspace(0, 2 * np.pi, n, endpoint=False)
     width = 2 * np.pi / n * 0.86
-    pcts, colors, labels = [], [], []
+    pcts, colors, bg_colors, labels = [], [], [], []
     for category, col, label, higher_is_better in metrics_list:
         value = match_values[col]
         pct = sb.percentile_of(baseline, col, value)
@@ -393,18 +401,26 @@ def _performance_wheel(match_values: dict[str, float], baseline: pd.DataFrame) -
             pct = 100 - pct
         pcts.append(pct)
         colors.append(_WHEEL_COLORS[category])
+        bg_colors.append(_WHEEL_BG_COLORS[category])
         labels.append(label)
 
+    inner_radius = 6.0  # donut-hole radius, in the same units as the 0-100 percentile axis
     fig, ax = plt.subplots(figsize=(6.6, 6.6), subplot_kw={"projection": "polar"}, facecolor=palette.PAPER)
     ax.set_facecolor(palette.PAPER); ax.set_theta_offset(np.pi / 2); ax.set_theta_direction(-1)
-    ax.bar(theta, [100] * n, width=width, color=palette.OPPONENT_GREY, alpha=0.35, zorder=1)
-    bars = ax.bar(theta, pcts, width=width, color=colors, alpha=0.92, zorder=2)
+    ax.bar(theta, [100 - inner_radius] * n, bottom=inner_radius, width=width, color=bg_colors, alpha=1.0, zorder=1,
+           edgecolor=palette.PAPER, linewidth=1.5)
+    ax.bar(theta, [max(0.0, p - inner_radius) for p in pcts], bottom=inner_radius, width=width, color=colors,
+           alpha=1.0, zorder=2, edgecolor=palette.PAPER, linewidth=1.5)
     for t, p, c in zip(theta, pcts, colors):
-        ax.text(t, min(p, 100) + 6, f"{p:.0f}", ha="center", va="center", fontsize=6.5, fontweight="bold", color=palette.INK, zorder=3)
+        label_r = max(p, inner_radius + 8)
+        ax.text(t, label_r, f"{p:.0f}", ha="center", va="center", fontsize=6.5, fontweight="bold",
+                 color="white", zorder=3,
+                 bbox=dict(boxstyle="round,pad=0.28", facecolor=c, edgecolor="none", alpha=0.96))
     ax.set_ylim(0, 108)
     ax.set_xticks(theta); ax.set_xticklabels(labels, fontsize=6)
-    ax.set_yticklabels([]); ax.grid(color=palette.HAIR, lw=0.5)
-    ax.spines["polar"].set_color(palette.HAIR)
+    ax.set_yticklabels([])
+    ax.grid(color=palette.HAIR, lw=0.6, linestyle=(0, (2, 2)))
+    ax.spines["polar"].set_visible(False)
     from matplotlib.patches import Patch
     handles = [Patch(color=palette.CHARLTON_RED, label="Attacking"),
                Patch(color="#b5892a", label="Possession/Progression"),
