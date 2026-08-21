@@ -261,7 +261,7 @@ def _entries_kpis(events: pd.DataFrame, team: str) -> dict[str, Any]:
     }
 
 
-def _regains_panel(events: pd.DataFrame, team: str) -> tuple[str, dict[str, Any], pd.Series]:
+def _regains_panel(events: pd.DataFrame, team: str, baseline: pd.DataFrame) -> tuple[str, dict[str, Any], pd.Series]:
     """Opposition-half ball wins, ringed where the team shot within 15s of
     winning it -- *and* kept the ball the whole way there (no opponent
     touch between the regain and the shot). Without the continuity check
@@ -293,13 +293,18 @@ def _regains_panel(events: pd.DataFrame, team: str) -> tuple[str, dict[str, Any]
         rx, ry = pitch._to_pitch(regains.loc[led, "startAdjCoordinatesX"], regains.loc[led, "startAdjCoordinatesY"])
         pitch_obj.scatter(rx, ry, ax=ax, s=90, facecolors="none", edgecolors=palette.CHARLTON_RED, linewidth=1.6, zorder=3)
     n = len(regains)
-    kpis = {"n": n, "shot_n": int(led.sum()) if n else 0, "shot_pct": round(int(led.sum()) / n * 100) if n else 0}
+    baseline_avg = float(baseline["opposition_half_regains"].mean())
+    kpis = {
+        "n": n, "shot_n": int(led.sum()) if n else 0, "shot_pct": round(int(led.sum()) / n * 100) if n else 0,
+        "baseline_avg": round(baseline_avg, 1), "baseline_delta": f"{n - baseline_avg:+.1f}",
+        "baseline_n": len(baseline),
+    }
     top6 = regains.groupby("playerName").size().sort_values(ascending=False).head(6)
     top6.index = [str(i).split()[-1] for i in top6.index]
     return _uri(fig), kpis, top6
 
 
-def _second_ball_panel(events: pd.DataFrame, team: str) -> tuple[str, dict[str, Any]]:
+def _second_ball_panel(events: pd.DataFrame, team: str, baseline: pd.DataFrame) -> tuple[str, dict[str, Any]]:
     """Second-ball contests this team was involved in, as the union of the
     events where they started the contest (SECOND_BALL_START) and where
     they won it (SECOND_BALL_WIN) -- these are separate events, sometimes
@@ -320,8 +325,18 @@ def _second_ball_panel(events: pd.DataFrame, team: str) -> tuple[str, dict[str, 
         if frame.empty: continue
         x, y = pitch._to_pitch(frame["startAdjCoordinatesX"], frame["startAdjCoordinatesY"])
         pitch_obj.scatter(x, y, ax=ax, s=42, color=color, marker=marker, edgecolors=palette.PAPER_2, linewidth=0.8, alpha=0.9, zorder=2)
+    from matplotlib.lines import Line2D
+    handles = [Line2D([0], [0], marker="o", color=palette.SUCCESS_GREEN, linestyle="", markersize=6, label="Won"),
+               Line2D([0], [0], marker="X", color=palette.FAIL_REDGREY, linestyle="", markersize=6, label="Lost")]
+    ax.legend(handles=handles, loc="lower center", bbox_to_anchor=(0.5, -0.06), ncol=2, frameon=False, fontsize=7)
     n = len(contests)
-    kpis = {"n": n, "won_n": len(won_ids), "won_pct": round(len(won_ids) / n * 100) if n else 0}
+    won_n = len(won_ids)
+    baseline_avg = float(baseline["second_ball_wins"].mean())
+    kpis = {
+        "n": n, "won_n": won_n, "won_pct": round(won_n / n * 100) if n else 0,
+        "baseline_avg": round(baseline_avg, 1), "baseline_delta": f"{won_n - baseline_avg:+.1f}",
+        "baseline_n": len(baseline),
+    }
     return _uri(fig), kpis
 
 
@@ -476,23 +491,36 @@ def _duel_bars_by_type(duels: pd.DataFrame, charlton: str, opponent: str, duel_t
         return agg.loc[agg["involvement"] > 0].sort_values("involvement", ascending=False).head(5)
 
     c, o = top5(charlton), top5(opponent)
-    x_max = max(1.0, float(pd.concat([c[["won", "lost"]], o[["won", "lost"]]]).to_numpy().max()))
+    # Fixed 15-either-side scale, matching the reference's own axis exactly
+    # (recovery/reference/verified_original page 13) rather than a
+    # data-driven max -- both duel-type panels on that page share one scale.
+    x_max = 15.0
 
-    fig, axes = plt.subplots(1, 2, figsize=(11.5, 4.6), facecolor=palette.PAPER)
+    fig, axes = plt.subplots(1, 2, figsize=(11.5, 4.9), facecolor=palette.PAPER)
+    fig.text(0.5, 0.97, "LOST ←        → WON", ha="center", va="top", fontsize=7.5, color=palette.MUTED)
     for ax, team, frame in zip(axes, (charlton, opponent), (c, o)):
         ax.set_facecolor(palette.PAPER)
         y = np.arange(len(frame))[::-1]
-        ax.barh(y, frame["won"], color=palette.SUCCESS_GREEN, alpha=0.9)
-        ax.barh(y, -frame["lost"], color=palette.FAIL_REDGREY, alpha=0.9)
+        ax.barh(y, frame["won"], color=palette.SUCCESS_GREEN, alpha=0.9, zorder=2)
+        ax.barh(y, -frame["lost"], color=palette.FAIL_REDGREY, alpha=0.9, zorder=2)
         for yi, w, l in zip(y, frame["won"], frame["lost"]):
             if l: ax.text(-l - x_max * 0.03, yi, f"{int(l)}", ha="right", va="center", fontsize=7, color=palette.FAIL_REDGREY)
             if w: ax.text(w + x_max * 0.03, yi, f"{int(w)}", ha="left", va="center", fontsize=7, color=palette.SUCCESS_GREEN)
         ax.set_yticks(y); ax.set_yticklabels(frame["surname"], fontsize=8, fontweight="bold")
-        ax.set_xlim(-x_max * 1.35, x_max * 1.35)
-        ax.axvline(0, color=palette.INK, lw=1)
+        ax.set_xlim(-x_max, x_max)
+        ticks = [-15, -10, -5, 0, 5, 10, 15]
+        ax.set_xticks(ticks); ax.set_xticklabels([str(abs(t)) for t in ticks], fontsize=6.5, color=palette.MUTED)
+        ax.grid(axis="x", color=palette.HAIR_SOFT, lw=0.5, zorder=1)
+        ax.axvline(0, color=palette.INK, lw=1, zorder=3)
         ax.set_title(team, fontsize=9, fontweight="bold",
                      color=palette.CHARLTON_RED if team == charlton else palette.OPPONENT_GREY)
-        ax.spines[:].set_visible(False); ax.set_xticks([])
+        ax.spines[:].set_visible(False)
+    from matplotlib.patches import Patch
+    handles = [Patch(color=palette.SUCCESS_GREEN, label="Won"), Patch(color=palette.FAIL_REDGREY, label="Lost")]
+    fig.legend(handles=handles, loc="lower center", ncol=2, frameon=False, fontsize=7,
+               bbox_to_anchor=(0.5, -0.02))
+    fig.text(0.62, -0.02, "Bars are mirrored around zero; labels show counts", ha="left", va="center",
+              fontsize=6.5, color=palette.MUTED)
     return _uri(fig)
 
 
@@ -724,14 +752,14 @@ def build_context(impect_match_id: int, dvms_match_id: str | None = None) -> dic
     met=max([float(n.edges["pxt"].abs().max()) for n in nets.values() if len(n.edges)] or [.001])
     networks={team:_local_passing_network_map(nets[team],mx,mt,met) for team in teams}
     network_scale_threat=round(mt,2)
-    regain_img,regain_kpis,recovery_top6=_regains_panel(events,subject)
-    second_ball_img,second_ball_kpis=_second_ball_panel(events,subject)
+    baseline=sb.build_season_baseline(charlton=subject)
+    regain_img,regain_kpis,recovery_top6=_regains_panel(events,subject,baseline)
+    second_ball_img,second_ball_kpis=_second_ball_panel(events,subject,baseline)
 
     home,away=context["meta"]["home_team"],context["meta"]["away_team"]
     team_stats=metrics.team_stats(events,home,away)
     chances=metrics.chance_sources(events,home,away)
     chance_source_img,chance_source_kpis=_chance_source_stacked(chances,subject,opponent)
-    baseline=sb.build_season_baseline(charlton=subject)
     baseline_row=baseline.mean(numeric_only=True)
     stat_rows_expanded=_stat_rows_expanded(team_stats,baseline_row,home,away,subject)
     # Reuse season_baseline's own per-match metric builder wholesale so the
