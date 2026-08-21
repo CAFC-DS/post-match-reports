@@ -274,6 +274,66 @@ is now either exact or has a specific, documented reason the residual gap
 is believed to be measurement noise rather than a wrong definition. No
 number in this file is silently presented as more certain than it is.
 
+### Session 4: exact-match styling pass (docs/superpowers/plans/2026-08-21-expanded-report-exact-match.md)
+
+A dedicated plan targeted every remaining *styling* gap between the report
+and the reference PDF, informed by forensic extraction of the reference's
+own embedded raster images and vector fill colours (via PyMuPDF), not
+visual approximation. All tasks were executed and validated against fresh
+2x-zoom renders of both PDFs, iterating until each page matched. Highlights:
+
+- **Global caption bug**: `.head span`'s CSS forced every panel caption to
+  uppercase; the reference's captions are italic mixed-case. One-line fix,
+  visible on nearly every page.
+- **Team Performance wheel**: rebuilt with a donut-hole centre,
+  per-category pale-tinted backgrounds (not uniform grey), dashed
+  gridlines, and white pill-badge value labels — all sampled directly from
+  the reference's own embedded chart image.
+- **Passing network**: rebuilt as a local chart function (in-node initials
+  instead of below-node labels with a halo, a diverging edge colour by
+  pair threat, a real 4-part legend as plain text) rather than reusing
+  `pitch.passing_network_map`'s styling, which the canonical one-page
+  report doesn't use at all. The legend's numeric threat range
+  (`-0.11...+0.11`) is computed live and matched the reference exactly.
+- **Heatmaps**: switched from `cmap="turbo"` to `cmap="jet"` (confirmed
+  from the reference's raster) and removed cell-edge gridlines for a
+  smooth blend. **Page 12's pressure heatmap was on the wrong pitch
+  orientation entirely** (horizontal; the reference is vertical/portrait)
+  — a structural bug, not a colouring one.
+- **Chance Source** (page 10): rebuilt as a 100%-stacked bar per team using
+  four exact hex colours sampled from the reference's own vector-drawn
+  bars (`#C0892D`/`#6D3F83`/`#5C7A4A`/`#A39D8F`) plus a KPI callout row.
+  The percentages and totals this produces (40%/0.40, 12%/0.12, 6%/0.06,
+  42%/0.42 for Charlton; 14%/0.19, 51%/0.69, 32%/0.43 for Derby) match the
+  reference's own printed numbers almost exactly.
+- **Task 8's full 16-page pass** caught real gaps the initial forensic
+  sweep missed: page 13's duel-performance charts had no axis tick labels,
+  no "LOST ← → WON" header, and no Won/Lost legend; page 14 was missing
+  the season-baseline comparison captions the reference shows on every
+  panel (`50 · avg 49.3 · Δ +0.7 (n=46)`, `39 of 88 · avg 28.9 · Δ +10.1
+  (n=46)`) — both reproduced **byte-for-byte** using the same
+  `season_baseline` averages already validated in session 2/3. Page 16 got
+  its explanatory caption and marker legend, but deliberately *not* a
+  baseline-average KPI caption: `season_baseline.py`'s existing
+  `counter_press_regains` column uses an older, different definition than
+  this page's current counter-press logic, and displaying it as "this
+  page's average" would have been a new inconsistency, not a fix — a
+  cheap-looking addition was correctly left out because the data behind it
+  didn't actually match what the page now computes.
+- **Task 9** (best-effort refinement of the two remaining near-miss
+  numbers, per explicit instruction to attempt it): no round parameter
+  value for either counter-press regains (tested 4.0-7.0s windows) or
+  transition speed (tested 3-8s sequence-gap thresholds) reproduced the
+  reference's exact numbers. More tellingly, transition speed's
+  team-ranking **never** matched the reference (Derby computed faster than
+  Charlton at every tested threshold; the reference has Charlton faster) —
+  this rules out "the formula is right but the parameter is off" and
+  confirms the true original formula is not recoverable from the evidence
+  available. No code changed as a result of this task; the existing
+  session-3 values stand, now with this negative result documented rather
+  than left for a future reader to re-discover by re-running the same
+  experiment.
+
 `src/report/expanded/render.py` and `src/report/expanded/metrics/` (three
 files) are **non-functional dead code** from the prior session — `render.py`
 imports `src.report.render` and a `src.report.metrics` *package* that don't
