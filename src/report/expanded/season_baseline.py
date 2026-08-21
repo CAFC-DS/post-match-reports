@@ -49,7 +49,7 @@ _FINAL_THIRD_X = 17.5
 _COUNTER_PRESS_WINDOW_S = 5.0
 
 
-def _match_metrics(events: pd.DataFrame, team: str, opponent: str) -> dict[str, float]:
+def match_metrics(events: pd.DataFrame, team: str, opponent: str) -> dict[str, float]:
     stats = metrics.team_stats(events, team, opponent) if team < opponent else metrics.team_stats(events, opponent, team)
     row = stats.loc[team]
 
@@ -140,7 +140,7 @@ def build_season_baseline(charlton: str = "Charlton Athletic", refresh: bool = F
         events = impect_cafcdb_source.load_match_events(match_id)
         meta = metrics.match_meta(events)
         opponent = meta.away_team if meta.home_team == charlton else meta.home_team
-        row = _match_metrics(events, charlton, opponent)
+        row = match_metrics(events, charlton, opponent)
         row["match_id"] = match_id
         row["opponent"] = opponent
         row["kickoff"] = meta.kickoff

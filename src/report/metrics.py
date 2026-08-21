@@ -212,8 +212,10 @@ def team_stats(events: pd.DataFrame, home: str, away: str) -> pd.DataFrame:
                 "touches_in_opposition_box": int(touches_opp_box),
                 # Packing: raw opponents/defenders taken out of the game by a
                 # pass or dribble (expanded report's Progression group).
-                "opponents_bypassed": int(t["BYPASSED_OPPONENTS"].sum()),
-                "defenders_bypassed": int(t["BYPASSED_DEFENDERS"].sum()),
+                # Optional -- older fixtures/tests built before this field
+                # existed still get a usable (zero) row rather than a KeyError.
+                "opponents_bypassed": int(t["BYPASSED_OPPONENTS"].sum()) if "BYPASSED_OPPONENTS" in t else 0,
+                "defenders_bypassed": int(t["BYPASSED_DEFENDERS"].sum()) if "BYPASSED_DEFENDERS" in t else 0,
             }
         )
     df = pd.DataFrame(rows).set_index("team")

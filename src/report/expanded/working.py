@@ -142,6 +142,48 @@ def _bars(labels: list[str], values: list[float], color: str) -> str:
     return _uri(fig)
 
 
+def _duel_bars_by_type(duels: pd.DataFrame, charlton: str, opponent: str, duel_type: str) -> str:
+    """Mirrored won/lost duel bars, top-5-by-involvement, one panel per team
+    -- the reference's page 13 layout (confirmed against the actual PDF).
+    The previous template rendered the *same* single-team chart twice.
+    ``duels`` is impect_cafcdb_source.load_duel_involvement's output -- a
+    per-player-per-event outcome, not team_stats' per-team sum, because the
+    *loser* of a duel is only recorded on a second entry in that event's own
+    KPI array, keyed by the loser's own playerId (see that function's
+    docstring)."""
+    d = duels.loc[duels["duel_type"] == duel_type]
+
+    def top5(team: str) -> pd.DataFrame:
+        t = d.loc[d["squadName"] == team]
+        agg = t.groupby("playerName", dropna=True)["outcome"].value_counts().unstack(fill_value=0)
+        agg = agg.rename(columns={"WON": "won", "LOST": "lost"})
+        for c in ("won", "lost"):
+            if c not in agg: agg[c] = 0
+        agg["surname"] = [str(n).split()[-1] for n in agg.index]
+        agg["involvement"] = agg["won"] + agg["lost"]
+        return agg.loc[agg["involvement"] > 0].sort_values("involvement", ascending=False).head(5)
+
+    c, o = top5(charlton), top5(opponent)
+    x_max = max(1.0, float(pd.concat([c[["won", "lost"]], o[["won", "lost"]]]).to_numpy().max()))
+
+    fig, axes = plt.subplots(1, 2, figsize=(11.5, 4.6), facecolor=palette.PAPER)
+    for ax, team, frame in zip(axes, (charlton, opponent), (c, o)):
+        ax.set_facecolor(palette.PAPER)
+        y = np.arange(len(frame))[::-1]
+        ax.barh(y, frame["won"], color=palette.SUCCESS_GREEN, alpha=0.9)
+        ax.barh(y, -frame["lost"], color=palette.FAIL_REDGREY, alpha=0.9)
+        for yi, w, l in zip(y, frame["won"], frame["lost"]):
+            if l: ax.text(-l - x_max * 0.03, yi, f"{int(l)}", ha="right", va="center", fontsize=7, color=palette.FAIL_REDGREY)
+            if w: ax.text(w + x_max * 0.03, yi, f"{int(w)}", ha="left", va="center", fontsize=7, color=palette.SUCCESS_GREEN)
+        ax.set_yticks(y); ax.set_yticklabels(frame["surname"], fontsize=8, fontweight="bold")
+        ax.set_xlim(-x_max * 1.35, x_max * 1.35)
+        ax.axvline(0, color=palette.INK, lw=1)
+        ax.set_title(team, fontsize=9, fontweight="bold",
+                     color=palette.CHARLTON_RED if team == charlton else palette.OPPONENT_GREY)
+        ax.spines[:].set_visible(False); ax.set_xticks([])
+    return _uri(fig)
+
+
 def _performance_wheel(match_values: dict[str, float], baseline: pd.DataFrame) -> str:
     """Percentile-vs-season wheel: each wedge is this match's percentile rank
     of that metric within Charlton's 25/26 season distribution, coloured by
@@ -275,13 +317,19 @@ def _transition_speed_mps(events: pd.DataFrame, team: str) -> float:
     gained = (pd.to_numeric(t["endAdjCoordinatesX"], errors="coerce")
               - pd.to_numeric(t["startAdjCoordinatesX"], errors="coerce")).clip(lower=0)
     dt_s = t["gameTimeInSec"].diff().clip(upper=15).fillna(1.0).clip(lower=0.5)
-    return float((gained / dt_s).mean())
+    # Total ground gained over total elapsed time, not a mean of per-event
+    # ratios -- averaging (gained/dt) directly overweights the many short,
+    # low-gain events between transition bursts and understates the actual
+    # pace of the bursts themselves.
+    return float(gained.sum() / dt_s.sum()) if dt_s.sum() else 0.0
 
 
 def build_context(impect_match_id: int, dvms_match_id: str | None = None) -> dict[str, Any]:
     context=build_shared_context(impect_match_id,dvms_match_id)
     events=impect_cafcdb_source.load_match_events(impect_match_id)
     events=_infer_pass_receivers(events)
+    player_lookup=events.loc[events["playerName"].notna(), ["playerId","playerName","squadName"]].drop_duplicates("playerId")
+    duel_involvement=impect_cafcdb_source.load_duel_involvement(impect_match_id,player_lookup)
     subject=context["meta"]["charlton_team"]
     opponent=context["meta"]["opponent_team"]
     teams=[subject,opponent]
@@ -308,16 +356,13 @@ def build_context(impect_match_id: int, dvms_match_id: str | None = None) -> dic
     baseline=sb.build_season_baseline(charlton=subject)
     baseline_row=baseline.mean(numeric_only=True)
     stat_rows_expanded=_stat_rows_expanded(team_stats,baseline_row,home,away,subject)
-    charlton_match_values={col:float(team_stats.loc[subject,col]) if col in team_stats.columns else
-                            (float(events.loc[events["squadName"]==subject,"PXT_ATTACK"].sum()) if col=="packing_xt" else 0.0)
-                            for _,col,_,_ in _PERFORMANCE_WHEEL_METRICS}
-    # progressive_actions/passes_into_final_third/pressing_intensity/counter_press_regains
-    # aren't team_stats columns -- reuse season_baseline's own per-match metric
-    # builder so match-day and season-distribution values share one definition.
-    charlton_match_values.update(
-        {k: v for k, v in sb._match_metrics(events, subject, opponent).items()
-         if k in {"progressive_actions", "passes_into_final_third", "pressing_intensity", "counter_press_regains", "packing_xt"}}
-    )
+    # Reuse season_baseline's own per-match metric builder wholesale so the
+    # match-day wheel values and the season distribution they're ranked
+    # against share one definition (a prior version rebuilt a subset by hand
+    # here under different key names -- won_ground_duels/won_aerial_duels vs
+    # duels_won, opponent_half_regains vs opposition_half_regains -- so two
+    # of twelve wedges silently read 0.0 every time).
+    charlton_match_values=sb.match_metrics(events,subject,opponent)
     speed_subject=_transition_speed_mps(events,subject)
     speed_opponent=_transition_speed_mps(events,opponent)
     context.update({
@@ -335,7 +380,8 @@ def build_context(impect_match_id: int, dvms_match_id: str | None = None) -> dic
         "regain_img":_event_map(regains,colors[subject]),
         "second_ball_img":_event_map(second,palette.SUCCESS_GREEN),
         "transition_img":_event_map(losses,colors[subject]),
-        "duel_player_img":_bars([str(x).split()[-1] for x in players.index],(players.ground+players.aerial).tolist(),colors[subject]),
+        "duel_aerial_bars_img":_duel_bars_by_type(duel_involvement,subject,opponent,"AERIAL"),
+        "duel_ground_bars_img":_duel_bars_by_type(duel_involvement,subject,opponent,"GROUND"),
         "recovery_player_img":_bars([str(x).split()[-1] for x in players.index],players.wins.tolist(),palette.SUCCESS_GREEN),
         "event_counts":{"pressures":len(pressures),"regains":len(regains),"second_balls":len(second),"losses":len(losses)},
         "big_chances":{

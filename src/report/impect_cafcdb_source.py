@@ -41,7 +41,7 @@ DEV_WAREHOUSE = "DEVELOPMENT_WH"
 _KPI_FIELDS = [
     "SHOT_XG", "PACKING_XG", "POSTSHOT_XG", "PXT_ATTACK", "PXT_PASS",
     "SUCCESSFUL_PASSES", "UNSUCCESSFUL_PASSES",
-    "WON_GROUND_DUELS", "WON_AERIAL_DUELS",
+    "WON_GROUND_DUELS", "WON_AERIAL_DUELS", "LOST_GROUND_DUELS", "LOST_AERIAL_DUELS",
     "BALL_WIN_NUMBER", "SECOND_BALL_WIN",
     "OFFENSIVE_TOUCHES",
     "SHOT_AT_GOAL_NUMBER", "SHOT_AT_GOAL_NUMBER_ON_TARGET",
@@ -179,3 +179,58 @@ def load_match_events(match_id: int, env_path: str = ".env") -> pd.DataFrame:
 
     df = df.drop(columns=["eventKpis"])
     return df
+
+
+_DUEL_KPI_FIELDS = ["WON_AERIAL_DUELS", "WON_GROUND_DUELS", "LOST_AERIAL_DUELS", "LOST_GROUND_DUELS"]
+
+
+def load_duel_involvement(match_id: int, player_lookup: pd.DataFrame, env_path: str = ".env") -> pd.DataFrame:
+    """One row per player per duel outcome (won/lost, aerial/ground).
+
+    EVENT_KPIS carries the *whole* duel, not just the winner's side: the
+    winning player's own KPI entry has WON_*_DUELS, and a second entry in the
+    same event's array -- for the player they beat, keyed by that player's
+    own playerId -- carries LOST_*_DUELS. ``load_match_events`` only reads
+    the entry matching the event row's own playerId (the winner), which is
+    why a naive groupby of its WON/LOST columns undercounts losses to zero.
+    This reads every entry in the array instead.
+
+    ``player_lookup`` maps playerId -> (playerName, squadName); PLAYERS has
+    no per-match squad column, so the caller builds this from the same
+    match's already-loaded ``load_match_events`` frame rather than a second
+    query (only players who touched the ball as the *acting* player would
+    have a squad otherwise -- a duel loser sometimes only appears in this
+    second KPI-array slot and never as an event's own actor).
+    """
+    connector = SnowflakeConnector(env_path)
+    with connector.connection() as conn:
+        cur = conn.cursor()
+        cur.execute(f"USE ROLE {DEV_ROLE}")
+        cur.execute(f"USE WAREHOUSE {DEV_WAREHOUSE}")
+        cur.execute(
+            "select EVENT_ID, EVENT_KPIS from CAFC_DB.IMPECT_RAW.EVENTS "
+            "where MATCH_ID = %(match_id)s and EVENT_KPIS is not null",
+            {"match_id": match_id},
+        )
+        event_rows = cur.fetchall()
+
+    lookup = player_lookup.set_index("playerId")
+    records = []
+    for event_id, kpi_json in event_rows:
+        if not kpi_json:
+            continue
+        for entry in json.loads(kpi_json):
+            player_id = entry.get("playerId")
+            if player_id is None or player_id not in lookup.index:
+                continue
+            for field in _DUEL_KPI_FIELDS:
+                if entry.get(field):
+                    records.append({
+                        "eventId": event_id,
+                        "playerId": player_id,
+                        "playerName": lookup.at[player_id, "playerName"],
+                        "squadName": lookup.at[player_id, "squadName"],
+                        "duel_type": field.split("_", 1)[1].replace("_DUELS", ""),
+                        "outcome": field.split("_", 1)[0],
+                    })
+    return pd.DataFrame(records, columns=["eventId", "playerId", "playerName", "squadName", "duel_type", "outcome"])
