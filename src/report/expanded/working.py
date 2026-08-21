@@ -458,6 +458,11 @@ def _match_highlights(match_values: dict[str, float], baseline: pd.DataFrame,
 
 
 def _xg_race(events: pd.DataFrame, teams: list[str]) -> str:
+    """Cumulative non-penalty xG step chart. X-axis ticks match the Match
+    Flow / Territory chart directly above it on the same page (0'/15'/30'/HT/
+    60'/75'/90', chart_dvms.territory_chart's own convention), not
+    matplotlib's default 0/20/40/60/80 -- the reference's two charts on this
+    page share one axis convention."""
     fig,ax=plt.subplots(figsize=(11.5,3.8),facecolor=palette.PAPER)
     ax.set_facecolor(palette.PAPER)
     for team,color in zip(teams,[palette.CHARLTON_RED,palette.OPPONENT_GREY]):
@@ -466,6 +471,8 @@ def _xg_race(events: pd.DataFrame, teams: list[str]) -> str:
         x=[0]+s["minute"].tolist()+[95]; y=[0]+s["SHOT_XG"].cumsum().tolist(); y=y+[y[-1]]
         ax.step(x,y,where="post",label=team,color=color,lw=2)
     ax.set_xlim(0,95); ax.spines[["top","right"]].set_visible(False); ax.grid(color=palette.HAIR_SOFT,lw=.6)
+    ax.set_xticks([0, 15, 30, 45, 60, 75, 90])
+    ax.set_xticklabels(["0'", "15'", "30'", "HT", "60'", "75'", "90'"])
     ax.tick_params(labelsize=7,colors=palette.MUTED); ax.legend(frameon=False,fontsize=7,loc="upper left")
     return _uri(fig)
 
