@@ -1,6 +1,6 @@
 # Expanded Report Exact-Match Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Close every remaining visual and structural gap between the recovered `charlton-post-match-analyst` expanded report and the true reference PDF, so the regenerated report is visually indistinguishable from `recovery/reference/verified_original/expanded_analyst_report_Charlton_Athletic_v_Derby_County_15-08-2026.pdf` — exact colors, exact chart types/orientations, exact captions, exact legends — not just structurally/data-correct.
 
@@ -114,7 +114,7 @@ for d in page.get_drawings():
 
 **Context:** The `.head span` CSS rule is `margin-left:auto;color:#6f6a5d;font-size:5.8pt;text-transform:uppercase`. This class is used both by the `header()` macro (which is fine — its content there is genuinely short labels) and by every `panel()` call's caption span, where the reference shows italic, mixed-case text (e.g. reference page 2: "*Baseline: compared to **25/26** averages*"; reference page 3: "*rolling 3-min mean tracked ball position — red = Charlton Athletic's attacking half, grey = Derby County's*"). The current CSS forces all of these to uppercase, which the reference never does for these longer descriptive captions.
 
-- [ ] **Step 1: Change the CSS rule**
+- [x] **Step 1: Change the CSS rule**
 
 In `src/report/expanded/templates/expanded.html.j2`, inside the single `<style>` line, find:
 ```
@@ -126,11 +126,11 @@ Replace with:
 ```
 (Font matches the reference's italic serif caption style already established for `.title p` elsewhere in this same stylesheet.)
 
-- [ ] **Step 2: Run the Visual Comparison Loop on pages 2 and 3**
+- [x] **Step 2: Run the Visual Comparison Loop on pages 2 and 3**
 
 Follow the Visual Comparison Loop (Global Constraints) for pages 2 and 3: generate, render both PDFs to `/tmp/qa_ref_02.png`/`/tmp/qa_fresh_02.png` and `/tmp/qa_ref_03.png`/`/tmp/qa_fresh_03.png`, open all four, and confirm the top-right captions ("Baseline: compared to 25/26 averages", "rolling 3-min mean tracked ball position") now render in italic mixed-case, not uppercase, matching the reference exactly. If any other discrepancy is visible on either page while you're looking, note it — fix it here if it's caption-related, otherwise flag it for Task 8. Repeat the loop until the caption styling matches.
 
-- [ ] **Step 3: Add the missing territory-chart caption clause**
+- [x] **Step 3: Add the missing territory-chart caption clause**
 
 The reference's page-3 territory caption has an extra clause the current template omits. In `src/report/expanded/templates/expanded.html.j2`, find the line containing:
 ```
@@ -141,14 +141,14 @@ Replace the caption argument with the full reference text (substituting the actu
 {{panel('Match Flow / Territory','rolling 3-min mean tracked ball position — red = '+subject+"'s attacking half, grey = "+opponent+"'s")}}
 ```
 
-- [ ] **Step 4: Run the test suite**
+- [x] **Step 4: Run the test suite**
 
 ```bash
 python3 -m pytest -q
 ```
 Expected: `81 passed, 1 skipped` (unchanged — this task touches no Python code).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/report/expanded/templates/expanded.html.j2
@@ -169,7 +169,7 @@ git commit -m "restore: fix caption text-transform bug and add territory chart's
 
 **Context:** Current implementation (`working.py:380-414`) draws a uniform-grey unfilled background, no donut hole, solid gridlines, and floating (no-background) value labels. The reference has category-tinted pale backgrounds, a hollow center, dashed gridlines, and pill-badge labels (see Forensic Reference Data above).
 
-- [ ] **Step 1: Add pale-tint background colors alongside the existing category colors**
+- [x] **Step 1: Add pale-tint background colors alongside the existing category colors**
 
 In `src/report/expanded/working.py`, find:
 ```python
@@ -184,7 +184,7 @@ _WHEEL_COLORS = {"attack": palette.CHARLTON_RED, "possession": "#b5892a", "defen
 _WHEEL_BG_COLORS = {"attack": "#f0cdc9", "possession": "#e8d5ae", "defend": "#c9c6c1"}
 ```
 
-- [ ] **Step 2: Rewrite `_performance_wheel` to draw category-tinted backgrounds, a donut hole, dashed gridlines, and pill labels**
+- [x] **Step 2: Rewrite `_performance_wheel` to draw category-tinted backgrounds, a donut hole, dashed gridlines, and pill labels**
 
 Replace the full function body (`working.py:380-414`) with:
 ```python
@@ -237,18 +237,18 @@ def _performance_wheel(match_values: dict[str, float], baseline: pd.DataFrame) -
     return _uri(fig)
 ```
 
-- [ ] **Step 3: Run the Visual Comparison Loop on page 2, iterating until it matches**
+- [x] **Step 3: Run the Visual Comparison Loop on page 2, iterating until it matches**
 
 Follow the Visual Comparison Loop: generate, render `/tmp/qa_ref_02.png` and `/tmp/qa_fresh_02.png` fresh, and open both. Also re-open `/tmp/p2_img_56.png` (the full-resolution embedded chart extracted in the Forensic Reference Data section) directly next to your fresh render's wheel for a tighter crop comparison than the full-page render alone gives you. Check specifically: pale per-category wedge backgrounds (not grey), a visible donut hole, dashed gridlines, white-on-color pill value labels, and — since this is a redraw, not a tweak — that the percentile values and wedge order are still correct after the rewrite. Adjust colors/radii/label sizing in `_performance_wheel` and repeat the full loop until no discrepancy remains, however small (e.g. label font size, pill corner radius, legend spacing).
 
-- [ ] **Step 4: Run the test suite**
+- [x] **Step 4: Run the test suite**
 
 ```bash
 python3 -m pytest -q
 ```
 Expected: `81 passed, 1 skipped`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/report/expanded/working.py
@@ -269,14 +269,14 @@ git commit -m "restore: match Team Performance wheel styling exactly (donut hole
 
 **Context:** The reference's xG Race x-axis reads `0', 15', 30', HT, 60', 75', 90'`, matching the Match Flow / Territory chart's axis immediately above it on the same page. The current implementation (`working.py:444-454`) uses matplotlib's default numeric ticks (`0, 20, 40, 60, 80`).
 
-- [ ] **Step 1: Check how the territory chart formats its minute axis, for consistency**
+- [x] **Step 1: Check how the territory chart formats its minute axis, for consistency**
 
 ```bash
 grep -n "def territory_chart" -A 40 src/report/chart_dvms.py | grep -n "xticks\|HT\|set_xtick"
 ```
 (Read the matched lines to copy the exact tick-label convention — likely a fixed list of minute positions with `"HT"` substituted at 45.)
 
-- [ ] **Step 2: Rewrite `_xg_race`'s axis formatting**
+- [x] **Step 2: Rewrite `_xg_race`'s axis formatting**
 
 Replace `working.py:444-454`:
 ```python
@@ -314,18 +314,18 @@ def _xg_race(events: pd.DataFrame, teams: list[str]) -> str:
     return _uri(fig)
 ```
 
-- [ ] **Step 3: Run the Visual Comparison Loop on page 3, iterating until it matches**
+- [x] **Step 3: Run the Visual Comparison Loop on page 3, iterating until it matches**
 
 Follow the Visual Comparison Loop for page 3 (`/tmp/qa_ref_03.png` vs. `/tmp/qa_fresh_03.png`). Confirm the xG Race chart's x-axis now reads `0' 15' 30' HT 60' 75' 90'` in the same position and style as the Match Flow / Territory chart's axis directly above it, and that tick label size/color match too. Adjust and repeat until they're indistinguishable in axis style.
 
-- [ ] **Step 4: Run the test suite**
+- [x] **Step 4: Run the test suite**
 
 ```bash
 python3 -m pytest -q
 ```
 Expected: `81 passed, 1 skipped`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/report/expanded/working.py
@@ -347,14 +347,14 @@ git commit -m "restore: match xG Race chart's x-axis to the territory chart's mi
 
 **Context:** `pitch.passing_network_map` (the shared function used today) draws labels below each node with a halo, has no in-image legend, and appends a "Full match · N passes..." caption baked into the image — none of which matches the reference. Rather than modify the shared function (forbidden by this plan's Global Constraints), this task writes a small report-local replacement that reuses the same underlying pitch-drawing helpers (`pitch._horizontal_pitch`, `pitch._to_pitch`, `pitch._threat_colors` — all already imported/used in `working.py`) but with the reference's exact label placement and no baked-in caption.
 
-- [ ] **Step 1: Check the private helpers this task reuses**
+- [x] **Step 1: Check the private helpers this task reuses**
 
 ```bash
 grep -n "^def _threat_colors\|^def _horizontal_pitch" -A 25 src/report/pitch.py
 ```
 Confirm `_threat_colors(threat: pd.Series, max_abs_threat: float) -> np.ndarray` returns an array of RGBA-like colors on a diverging purple-grey-green scale (this is the function to reuse for both node AND edge coloring — currently only used for nodes).
 
-- [ ] **Step 2: Write the new local chart function**
+- [x] **Step 2: Write the new local chart function**
 
 Add to `src/report/expanded/working.py`, near `_duel_location_map` (after line ~193):
 ```python
@@ -401,7 +401,7 @@ def _local_passing_network_map(net: "metrics.PassingNetwork", max_edge_passes: i
     return pitch._fig_to_uri(fig)
 ```
 
-- [ ] **Step 3: Check what `net.edges` currently contains for edge threat, and add it if missing**
+- [x] **Step 3: Check what `net.edges` currently contains for edge threat, and add it if missing**
 
 ```bash
 grep -n "class PassingNetwork\|edges\[" src/report/metrics.py | head -10
@@ -437,7 +437,7 @@ def _starters_only_network(net: "metrics.PassingNetwork") -> "metrics.PassingNet
 ```
 (Leaving `pxt` at a neutral `0.0` for every edge is an accepted simplification: `metrics.passing_network`'s edges DataFrame doesn't carry a pair-level threat sum today, and computing one properly requires re-deriving it from the underlying pass events, which is out of scope for this styling task — edges will render at the diverging scale's grey midpoint. Flag this in the commit message as a known simplification, not silently.)
 
-- [ ] **Step 4: Wire the new function into `build_context`, replacing `pitch.passing_network_map`**
+- [x] **Step 4: Wire the new function into `build_context`, replacing `pitch.passing_network_map`**
 
 In `src/report/expanded/working.py`, find (around line 532-536, inside `build_context`):
 ```python
@@ -455,7 +455,7 @@ Replace with:
     networks={team:_local_passing_network_map(nets[team],mx,mt,met) for team in teams}
 ```
 
-- [ ] **Step 5: Fix the template — remove the duplicate header, add the legend row**
+- [x] **Step 5: Fix the template — remove the duplicate header, add the legend row**
 
 In `src/report/expanded/templates/expanded.html.j2`, find line 12:
 ```
@@ -467,18 +467,18 @@ Replace with:
 ```
 (This drops the duplicate inner `panel()` call entirely — the outer `header()` now carries the caption directly, matching the reference's single header bar — and adds the legend as plain HTML text below the chart image, matching the reference's plain-text legend rather than baking it into the raster.)
 
-- [ ] **Step 6: Run the Visual Comparison Loop on pages 5 and 6, iterating until they match**
+- [x] **Step 6: Run the Visual Comparison Loop on pages 5 and 6, iterating until they match**
 
 Follow the Visual Comparison Loop for both pages (`/tmp/qa_ref_05.png`/`/tmp/qa_fresh_05.png`, `/tmp/qa_ref_06.png`/`/tmp/qa_fresh_06.png` — page 6 is Derby County's network, exercising the same code path with different data, so check both, not just one). Also compare directly against `/tmp/p5_img_74.png` (the full-resolution embedded reference chart) for the node/label/edge details a full-page render compresses. Confirm: single header bar (no duplicate title), initials centered inside node circles in white bold text, legend text visible below the chart in the exact format specified, no "Full match..." line anywhere, and edge colors on a visible purple-grey-green scale rather than flat grey. Adjust and repeat until all of this holds on both pages.
 
-- [ ] **Step 7: Run the test suite**
+- [x] **Step 7: Run the test suite**
 
 ```bash
 python3 -m pytest -q
 ```
 Expected: `81 passed, 1 skipped`.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add src/report/expanded/working.py src/report/expanded/templates/expanded.html.j2
@@ -500,7 +500,7 @@ git commit -m "restore: passing network exact styling (in-node labels, real lege
 
 **Context:** Both heatmaps currently use `cmap="turbo"` with visible cell-edge gridlines and over-aggressive smoothing; the reference uses `cmap="jet"` with no visible cell borders and preserves low-data gaps as pale patches. Separately, the pressure heatmap is on the wrong pitch orientation entirely (horizontal instead of the reference's vertical/portrait).
 
-- [ ] **Step 1: Fix `_threat_heatmap`'s colormap and remove cell-edge lines**
+- [x] **Step 1: Fix `_threat_heatmap`'s colormap and remove cell-edge lines**
 
 In `src/report/expanded/working.py`, find (line ~469):
 ```python
@@ -511,7 +511,7 @@ Replace with:
     pitch_obj.heatmap(bin_stat, ax=ax, cmap="jet", edgecolors="none", alpha=0.78, zorder=1)
 ```
 
-- [ ] **Step 2: Convert `_pressure_activity` to a vertical pitch, and fix its colormap**
+- [x] **Step 2: Convert `_pressure_activity` to a vertical pitch, and fix its colormap**
 
 Replace the full function (`working.py:146-174`):
 ```python
@@ -584,7 +584,7 @@ def _pressure_activity(pressure_events: pd.DataFrame) -> tuple[str, dict[str, An
 ```
 (Note: `bin_statistic`'s `bins=(8, 12)` argument order swaps from `(12, 8)` because the pitch length/width axes swap roles between horizontal and vertical orientation — same convention `_threat_heatmap` already uses on its own `VerticalPitch`.)
 
-- [ ] **Step 3: Adjust the page-12 CSS grid for a portrait pressure chart**
+- [x] **Step 3: Adjust the page-12 CSS grid for a portrait pressure chart**
 
 In `src/report/expanded/templates/expanded.html.j2`, find in the single-line `<style>` block:
 ```
@@ -596,18 +596,18 @@ Replace with:
 ```
 (Narrower left column to properly fit the now-portrait pressure chart alongside the duel maps, matching the reference's proportions on page 12.)
 
-- [ ] **Step 4: Run the Visual Comparison Loop on pages 9 and 12, iterating until they match**
+- [x] **Step 4: Run the Visual Comparison Loop on pages 9 and 12, iterating until they match**
 
 Follow the Visual Comparison Loop for both pages (`/tmp/qa_ref_09.png`/`/tmp/qa_fresh_09.png`, `/tmp/qa_ref_12.png`/`/tmp/qa_fresh_12.png`), plus a direct crop comparison against `/tmp/p9_img_110.png` and `/tmp/p12_img_174.png` for colormap precision. Confirm: both heatmaps use the jet color scale (dark blue → teal → green → yellow → orange → red, no pink/magenta band), no visible cell grid lines, low-data areas show as pale patches rather than smoothed-over color, and page 12's pressure chart is now a vertical/portrait pitch proportioned like the duel maps beside it, not a horizontal one. Adjust `alpha`, smoothing `sigma`, bin counts, or the `.p12` grid proportions and repeat until the color gradient and orientation are visually indistinguishable from the reference crops.
 
-- [ ] **Step 5: Run the test suite**
+- [x] **Step 5: Run the test suite**
 
 ```bash
 python3 -m pytest -q
 ```
 Expected: `81 passed, 1 skipped`.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/report/expanded/working.py src/report/expanded/templates/expanded.html.j2
@@ -629,7 +629,7 @@ git commit -m "restore: exact heatmap colormap (jet, not turbo) and fix pressure
 
 **Context:** The reference captions this panel "76 entries · 42 completed (55%) · 43 final third · 33 box"; the current template shows the entry-map image with no caption at all. `metrics.zone_entries` (already used to build the image via `render_combined.build_context`) returns a DataFrame with `success`, `carry`, and `endPitchPosition` columns — everything needed to compute this caption without querying anything new.
 
-- [ ] **Step 1: Write the KPI helper**
+- [x] **Step 1: Write the KPI helper**
 
 Add to `src/report/expanded/working.py`, near `_regains_panel`:
 ```python
@@ -649,7 +649,7 @@ def _entries_kpis(events: pd.DataFrame, team: str) -> dict[str, Any]:
     }
 ```
 
-- [ ] **Step 2: Wire it into `build_context`**
+- [x] **Step 2: Wire it into `build_context`**
 
 In `src/report/expanded/working.py`, inside `build_context`, find the line building `threat_img,threat_pxt,threat_actions=_threat_heatmap(events,subject)` and add directly after it:
 ```python
@@ -660,7 +660,7 @@ Then in the `context.update({...})` call, add:
         "entries_kpis":entries_kpis,
 ```
 
-- [ ] **Step 3: Add the caption to the template**
+- [x] **Step 3: Add the caption to the template**
 
 In `src/report/expanded/templates/expanded.html.j2`, find (page 9's entries panel):
 ```
@@ -671,18 +671,18 @@ Replace with:
 {{panel('Final Third Entries & Box Entries','route · outcome · destination')}}<img class="chart" src="{{side_by_team[subject].entries}}"><div class="muted" style="text-align:center">{{entries_kpis.n}} entries · {{entries_kpis.completed}} completed ({{entries_kpis.completed_pct}}%) · {{entries_kpis.final_third}} final third · {{entries_kpis.box}} box</div></div>
 ```
 
-- [ ] **Step 4: Run the Visual Comparison Loop on page 9, iterating until the caption format and placement match**
+- [x] **Step 4: Run the Visual Comparison Loop on page 9, iterating until the caption format and placement match**
 
 Follow the Visual Comparison Loop for page 9 (`/tmp/qa_ref_09.png` vs. `/tmp/qa_fresh_09.png`). Confirm the entries panel now shows a caption in the "N entries · M completed (P%) · F final third · B box" format, in the same position, size, and style as the reference's caption. (The exact numbers may still differ from the reference's 76/42/55%/43/33 — that's a data-source question already covered by `RECOVERY_NOTES.md`'s validated `zone_entries` usage, not this task's scope; this task's job is the caption's format and visual placement, using the real underlying data.) Adjust spacing/font size and repeat until the caption reads and sits exactly like the reference's.
 
-- [ ] **Step 5: Run the test suite**
+- [x] **Step 5: Run the test suite**
 
 ```bash
 python3 -m pytest -q
 ```
 Expected: `81 passed, 1 skipped`.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/report/expanded/working.py src/report/expanded/templates/expanded.html.j2
@@ -704,7 +704,7 @@ git commit -m "restore: add real entries/completed/final-third/box caption to pa
 
 **Context:** The current template reuses `chance_source_img` from `render_combined.build_context`, which draws grouped horizontal bars (see that function's own docstring in `src/report/chart.py:149-162` explaining why the *canonical* report deliberately avoids a stacked design). The expanded report's reference is a **different, deliberate design** — a vertical 100%-stacked bar per team with percentage + value labels per segment, plus a KPI callout row underneath. This is exactly the kind of report-local deviation this plan's Global Constraints call for building locally rather than changing the shared `chart.py` function.
 
-- [ ] **Step 1: Write the stacked-bar chart function**
+- [x] **Step 1: Write the stacked-bar chart function**
 
 Add to `src/report/expanded/working.py`, near `_duel_bars_by_type`:
 ```python
@@ -759,7 +759,7 @@ def _chance_source_stacked(chances: pd.DataFrame, charlton: str, opponent: str) 
     return _uri(fig), kpis
 ```
 
-- [ ] **Step 2: Wire it into `build_context`**
+- [x] **Step 2: Wire it into `build_context`**
 
 In `src/report/expanded/working.py`, inside `build_context`, find where `home,away=context["meta"]["home_team"],context["meta"]["away_team"]` is set and add, after `team_stats` is computed:
 ```python
@@ -772,7 +772,7 @@ Then in `context.update({...})`, add:
 ```
 (This intentionally overwrites the `chance_source_img` key that `build_shared_context` already populated with the canonical report's grouped-bar version — the expanded report's own build_context call is the last write, so this key ends up holding the new stacked chart, matching how `stat_rows_expanded` already overrides the canonical `stat_rows` pattern elsewhere in this same function.)
 
-- [ ] **Step 3: Add the KPI callout row to the template**
+- [x] **Step 3: Add the KPI callout row to the template**
 
 In `src/report/expanded/templates/expanded.html.j2`, find (page 10):
 ```
@@ -783,18 +783,18 @@ Replace with:
 <div class="card"><h2>Chance Source</h2><img class="chart" src="{{chance_source_img}}"><div class="muted" style="font-size:5.5pt;text-align:center;margin-top:1mm">{{subject}} top source: <b>{{chance_source_kpis.charlton_top_source}}</b> · total npxG <b>{{chance_source_kpis.charlton_total}}</b><br>{{opponent}} top source: <b>{{chance_source_kpis.opponent_top_source}}</b> · total npxG <b>{{chance_source_kpis.opponent_total}}</b></div></div>
 ```
 
-- [ ] **Step 4: Run the Visual Comparison Loop on page 10, iterating until the stacked bar matches exactly**
+- [x] **Step 4: Run the Visual Comparison Loop on page 10, iterating until the stacked bar matches exactly**
 
 Follow the Visual Comparison Loop for page 10 (`/tmp/qa_ref_10.png` vs. `/tmp/qa_fresh_10.png`). Confirm: two vertical 100%-stacked bars (one per team), segments colored `#C0892D`/`#6D3F83`/`#5C7A4A`/`#A39D8F` in the Set piece/Transition/Open play/Second ball order bottom-to-top, `%` and value labels on each segment large enough to read (reference omits the label on segments too thin to fit it — match that behavior, don't overlap text), and the KPI callout text below in the same position as the reference's "top source / total npxG" lines. Adjust bar width, figure size, and label thresholds and repeat until it matches.
 
-- [ ] **Step 5: Run the test suite**
+- [x] **Step 5: Run the test suite**
 
 ```bash
 python3 -m pytest -q
 ```
 Expected: `81 passed, 1 skipped`.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/report/expanded/working.py src/report/expanded/templates/expanded.html.j2
@@ -815,7 +815,7 @@ git commit -m "restore: rebuild Chance Source as an exact-match stacked bar char
 
 **Context:** Tasks 1-7 target every gap identified during this plan's forensic pass, but that pass focused on the pages with the largest known gaps (2, 3, 5, 6, 9, 10, 12). This task re-examines every page methodically, including ones assumed close (1, 4, 7, 8, 11, 13, 14, 15, 16), catching anything the earlier forensic pass missed.
 
-- [ ] **Step 1: Regenerate the full report and render every page at 2x from both PDFs**
+- [x] **Step 1: Regenerate the full report and render every page at 2x from both PDFs**
 
 ```bash
 cd /Users/hashim.umarji/Projects/charlton-post-match-analyst
@@ -831,15 +831,15 @@ for i in range(16):
 "
 ```
 
-- [ ] **Step 2: Visually compare each page pair, page 1 through page 16, in order**
+- [x] **Step 2: Visually compare each page pair, page 1 through page 16, in order**
 
 For each page: open `/tmp/qa_ref_NN.png` and `/tmp/qa_fresh_NN.png` side by side. Check specifically for: font/weight mismatches, color mismatches, spacing/alignment differences, missing or extra text, wrong chart types, legend differences. Note every discrepancy found, however small.
 
-- [ ] **Step 3: Fix each discrepancy found in Step 2, then repeat Steps 1-2 on the full 16 pages until Step 2 finds nothing left**
+- [x] **Step 3: Fix each discrepancy found in Step 2, then repeat Steps 1-2 on the full 16 pages until Step 2 finds nothing left**
 
 For each issue: locate the responsible code in `working.py` or `expanded.html.j2` (following the same investigation pattern as Tasks 1-7 — extract the reference's exact raster/vector data via PyMuPDF if a color or exact chart shape is in question, per the "Forensic Reference Data" section's extraction snippet), fix it, regenerate, and re-compare that specific page before moving to the next issue. Once every issue from a given pass is fixed, re-run Step 1's full render and redo Step 2's full 16-page comparison from page 1 again — a fix on one page can occasionally shift shared macro/CSS behavior on another. Do not stop after one pass; stop only when a full pass finds zero new discrepancies.
 
-- [ ] **Step 4: Full-suite pixel diff as a final sanity check (not a pass/fail gate — see caveat)**
+- [x] **Step 4: Full-suite pixel diff as a final sanity check (not a pass/fail gate — see caveat)**
 
 ```bash
 python3 -c "
@@ -857,7 +857,7 @@ for i in range(1, 17):
 ```
 Note: as established earlier in this recovery (`RECOVERY_NOTES.md`), raw pixel-diff percentage is not a reliable fidelity signal on its own — a correct chart in a slightly different exact pixel position can score worse than an incorrect one. Use this only to spot pages that regressed unexpectedly compared to the per-page checks already done in Step 2-3, not as a target to minimize directly.
 
-- [ ] **Step 5: Run the full test suite and the canonical report check one final time**
+- [x] **Step 5: Run the full test suite and the canonical report check one final time**
 
 ```bash
 python3 -m pytest -q
@@ -865,7 +865,7 @@ python3 -m src.report.render_combined --impect-match-id 267831 --dvms-match-id 2
 ```
 Expected: `81 passed, 1 skipped`; `Wrote HTML: ...` with no traceback.
 
-- [ ] **Step 6: Copy the final result to `outputs/` and commit**
+- [x] **Step 6: Copy the final result to `outputs/` and commit**
 
 ```bash
 python3 generate_report_expanded.py --impect-match-id 267831 --dvms-match-id 2647253 --output-dir outputs
@@ -887,7 +887,7 @@ git commit -m "restore: final visual QA pass — close remaining exact-match gap
 
 **Context:** Per `RECOVERY_NOTES.md`, two numbers are close but not exact: counter-press regains (55 vs. reference 58) and transition speed (3.75/4.15 vs. reference 3.65/3.38). The original formulas that produced these exact numbers are gone; this task is exploratory, not guaranteed to converge, and should stop once no further concrete evidence is available to test a variant against — repeat guessing at boundary conditions is explicitly out of scope per this task's own framing.
 
-- [ ] **Step 1: Try alternate counter-press windows against the known target**
+- [x] **Step 1: Try alternate counter-press windows against the known target**
 
 ```bash
 cd /Users/hashim.umarji/Projects/charlton-post-match-analyst
@@ -909,7 +909,7 @@ for window in (4.0, 4.5, 5.0, 5.5, 6.0, 6.5, 7.0):
 ```
 If any window value reproduces exactly `58`, note it — but do not adopt a non-round window value (e.g. `5.3`) purely because it happens to hit the target on this one fixture; that would be overfitting to a single match rather than recovering a real definition. Only adopt a change if a *round, defensible* window (e.g. `6.0`) reproduces the target, or leave the current `5.0`s window as-is and record in `RECOVERY_NOTES.md` that this was tried and didn't move the number closer without overfitting.
 
-- [ ] **Step 2: Try alternate transition-speed sequence-gap thresholds**
+- [x] **Step 2: Try alternate transition-speed sequence-gap thresholds**
 
 ```bash
 python3 -c "
@@ -945,11 +945,11 @@ for gap in (3,4,5,6,7,8):
 ```
 Same rule as Step 1: only adopt a variant that hits the target with a round, defensible parameter. Otherwise leave as-is.
 
-- [ ] **Step 3: If a defensible improvement was found in Step 1 or 2, apply it**
+- [x] **Step 3: If a defensible improvement was found in Step 1 or 2, apply it**
 
 Edit the relevant constant in `_transition_response_map` (the `<= 5` window in the counter-press loop) or `_transition_speed_mps` (the `gap > 6` sequence-break threshold), following the exact same code structure already present — this is a one-constant change, not a rewrite.
 
-- [ ] **Step 4: Regenerate, verify, and update `RECOVERY_NOTES.md`**
+- [x] **Step 4: Regenerate, verify, and update `RECOVERY_NOTES.md`**
 
 ```bash
 python3 generate_report_expanded.py --impect-match-id 267831 --dvms-match-id 2647253 --output-dir /tmp/expanded_report_check
@@ -957,7 +957,7 @@ python3 -m pytest -q
 ```
 Update the relevant paragraph in `RECOVERY_NOTES.md`'s "Session 3" section to reflect either the improved match, or the explicit conclusion that no defensible parameter reproduces the target and the existing value stands.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A
