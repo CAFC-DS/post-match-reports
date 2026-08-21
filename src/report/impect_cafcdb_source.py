@@ -39,7 +39,7 @@ DEV_WAREHOUSE = "DEVELOPMENT_WH"
 # elsewhere in metrics.py) rather than NaN, since these are the raw inputs to
 # arithmetic (sums, comparisons) metrics.py performs directly on the column.
 _KPI_FIELDS = [
-    "SHOT_XG", "PACKING_XG", "POSTSHOT_XG", "PXT_ATTACK",
+    "SHOT_XG", "PACKING_XG", "POSTSHOT_XG", "PXT_ATTACK", "PXT_PASS",
     "SUCCESSFUL_PASSES", "UNSUCCESSFUL_PASSES",
     "WON_GROUND_DUELS", "WON_AERIAL_DUELS",
     "BALL_WIN_NUMBER", "SECOND_BALL_WIN",
@@ -47,6 +47,10 @@ _KPI_FIELDS = [
     "SHOT_AT_GOAL_NUMBER", "SHOT_AT_GOAL_NUMBER_ON_TARGET",
     "SHOT_AT_GOAL_NUMBER_SUCCESS", "SHOT_AT_GOAL_NUMBER_BLOCKED",
     "SHOT_AT_GOAL_NUMBER_OTHER",
+    # Packing counts (2026-08, expanded report): raw opponents/defenders
+    # taken out of the game by a pass or dribble, confirmed present on
+    # PASS/DRIBBLE events in EVENT_KPIS.
+    "BYPASSED_OPPONENTS", "BYPASSED_DEFENDERS",
 ]
 
 _EVENTS_SQL = """
