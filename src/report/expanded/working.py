@@ -156,16 +156,21 @@ def _pressure_activity(pressure_events: pd.DataFrame) -> tuple[str, dict[str, An
     in the pressing team's own attacking frame before plotting or deriving
     territory share, matching the convention already used by the working
     single-team event maps elsewhere in this module.
+
+    Drawn on a VERTICAL pitch, matching the reference exactly (recovery/
+    reference/verified_original page 12, embedded raster xref 174) -- the
+    prior version used a horizontal pitch, a real structural mismatch, not
+    just a colouring difference.
     """
     x = -pd.to_numeric(pressure_events["startAdjCoordinatesX"], errors="coerce")
     y = -pd.to_numeric(pressure_events["startAdjCoordinatesY"], errors="coerce")
-    pitch_obj = Pitch(pad_top=1, pad_bottom=1, pad_left=1, pad_right=1, **_heatmap_pitch_kwargs())
-    fig, ax = pitch_obj.draw(figsize=(8.8, 5.7))
+    pitch_obj = VerticalPitch(pad_top=1, pad_bottom=1, pad_left=1, pad_right=1, **_heatmap_pitch_kwargs())
+    fig, ax = pitch_obj.draw(figsize=(5.6, 8.6))
     fig.set_facecolor(palette.PAPER_2)
     px, py = pitch._to_pitch(x, y)
-    bin_stat = pitch_obj.bin_statistic(px, py, statistic="count", bins=(12, 8))
-    bin_stat["statistic"] = gaussian_filter(bin_stat["statistic"], 1)
-    pitch_obj.heatmap(bin_stat, ax=ax, cmap="turbo", edgecolors=palette.PAPER_2, alpha=0.8, zorder=1)
+    bin_stat = pitch_obj.bin_statistic(px, py, statistic="count", bins=(8, 12))
+    bin_stat["statistic"] = gaussian_filter(bin_stat["statistic"], 0.8)
+    pitch_obj.heatmap(bin_stat, ax=ax, cmap="jet", edgecolors="none", alpha=0.78, zorder=1)
 
     top = pressure_events.groupby("playerName").size().sort_values(ascending=False)
     kpis = {
@@ -530,9 +535,9 @@ def _threat_heatmap(events: pd.DataFrame, team: str) -> tuple[str, float, int]:
     fig, ax = pitch_obj.draw(figsize=(5.2, 7.4))
     fig.set_facecolor(palette.PAPER_2)
     x, y = pitch._to_pitch(t["startAdjCoordinatesX"], t["startAdjCoordinatesY"])
-    bin_stat = pitch_obj.bin_statistic(x, y, values=t["PXT_ATTACK"], statistic="sum", bins=(9, 12))
-    bin_stat["statistic"] = gaussian_filter(bin_stat["statistic"], 1)
-    pitch_obj.heatmap(bin_stat, ax=ax, cmap="turbo", edgecolors=palette.PAPER_2, alpha=0.8, zorder=1)
+    bin_stat = pitch_obj.bin_statistic(x, y, values=t["PXT_ATTACK"], statistic="sum", bins=(12, 18))
+    bin_stat["statistic"] = gaussian_filter(bin_stat["statistic"], 1.4)
+    pitch_obj.heatmap(bin_stat, ax=ax, cmap="jet", edgecolors="none", alpha=0.62, zorder=1)
     return _uri(fig), round(float(t["PXT_ATTACK"].sum()), 2), len(t)
 
 
