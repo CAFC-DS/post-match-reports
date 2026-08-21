@@ -403,6 +403,57 @@ def _bars(labels: list[str], values: list[float], color: str) -> str:
     return _uri(fig)
 
 
+# Exact colors sampled from the reference PDF's own vector-drawn bars
+# (recovery/reference/verified_original page 10, page.get_drawings() fill
+# values) -- Open play and Second ball already match existing palette
+# constants exactly; Set piece and Transition are new to this chart.
+_CHANCE_SOURCE_COLORS = {
+    "Set piece": "#C0892D",
+    "Transition": "#6D3F83",
+    "Open play": palette.SUCCESS_GREEN,
+    "Second ball": palette.OPPONENT_GREY_LIGHT,
+}
+
+
+def _chance_source_stacked(chances: pd.DataFrame, charlton: str, opponent: str) -> tuple[str, dict[str, Any]]:
+    """100%-stacked non-penalty-xG-by-source bar per team, matching the
+    reference's page 10 panel exactly -- a deliberately different design
+    from chart.chance_source_bars' grouped bars, which that function's own
+    docstring explains is the right call for the *canonical* one-page
+    report but not for this one (see chart.py:149-162)."""
+    phases = list(chances.index)  # Set piece, Transition, Open play, Second ball (bottom to top)
+    fig, ax = plt.subplots(figsize=(2.6, 4.4), facecolor=palette.PAPER)
+    ax.set_facecolor(palette.PAPER)
+    teams = [charlton, opponent]
+    totals = {team: float(chances[team].sum()) for team in teams}
+    bottoms = {team: 0.0 for team in teams}
+    for phase in phases:
+        color = _CHANCE_SOURCE_COLORS[phase]
+        for xi, team in enumerate(teams):
+            value = float(chances.at[phase, team])
+            total = totals[team] or 1.0
+            share_pct = value / total * 100
+            ax.bar(xi, share_pct, bottom=bottoms[team], color=color, width=0.62, zorder=2)
+            if share_pct > 4:
+                ax.text(xi, bottoms[team] + share_pct / 2, f"{share_pct:.0f}%\n{value:.2f}",
+                        ha="center", va="center", fontsize=6.2, fontweight="bold", color="white")
+            bottoms[team] += share_pct
+    ax.set_xticks([0, 1]); ax.set_xticklabels([t.replace(" ", "\n") for t in teams], fontsize=7.5, fontweight="bold")
+    ax.set_ylim(0, 100); ax.set_yticks([0, 20, 40, 60, 80, 100])
+    ax.tick_params(labelsize=6.5, colors=palette.MUTED)
+    ax.spines[["top", "right"]].set_visible(False)
+    ax.set_ylabel("Share of non-penalty xG (%)", fontsize=6.5, color=palette.MUTED)
+
+    top_source = {team: chances[team].idxmax() for team in teams}
+    kpis = {
+        "charlton_top_source": top_source[charlton],
+        "opponent_top_source": top_source[opponent],
+        "charlton_total": round(totals[charlton], 2),
+        "opponent_total": round(totals[opponent], 2),
+    }
+    return _uri(fig), kpis
+
+
 def _duel_bars_by_type(duels: pd.DataFrame, charlton: str, opponent: str, duel_type: str) -> str:
     """Mirrored won/lost duel bars, top-5-by-involvement, one panel per team
     -- the reference's page 13 layout (confirmed against the actual PDF).
@@ -678,6 +729,8 @@ def build_context(impect_match_id: int, dvms_match_id: str | None = None) -> dic
 
     home,away=context["meta"]["home_team"],context["meta"]["away_team"]
     team_stats=metrics.team_stats(events,home,away)
+    chances=metrics.chance_sources(events,home,away)
+    chance_source_img,chance_source_kpis=_chance_source_stacked(chances,subject,opponent)
     baseline=sb.build_season_baseline(charlton=subject)
     baseline_row=baseline.mean(numeric_only=True)
     stat_rows_expanded=_stat_rows_expanded(team_stats,baseline_row,home,away,subject)
@@ -704,6 +757,7 @@ def build_context(impect_match_id: int, dvms_match_id: str | None = None) -> dic
         "xg_race_img":_xg_race(events,teams),
         "threat_img":threat_img,"threat_pxt":threat_pxt,"threat_actions":threat_actions,
         "entries_kpis":entries_kpis,
+        "chance_source_img":chance_source_img,"chance_source_kpis":chance_source_kpis,
         "pressure_img":pressure_img,"pressure_kpis":pressure_kpis,
         "ground_duel_img":_duel_location_map(duel_involvement,subject,"GROUND"),
         "aerial_duel_img":_duel_location_map(duel_involvement,subject,"AERIAL"),
