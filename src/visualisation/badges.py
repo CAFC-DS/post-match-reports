@@ -16,11 +16,36 @@ BADGE_DIR = Path(__file__).resolve().parents[2] / "assets" / "badges"
 
 
 TEAM_BADGE_FILES: dict[str, str] = {
+    "AFC Wrexham": "Wrexham_A.F.C._Logo.svg.png",
+    "Birmingham City": "Birmingham-City.png",
+    "Blackburn Rovers": "Blackburn_Rovers.svg.png",
+    "Bolton Wanderers": "Bolton_Wanderers_FC_logo.svg.png",
+    "Bristol City": "Bristol_City_crest.png",
+    "Cardiff City": "Cardiff_City_crest.svg.png",
     "Charlton Athletic": "Charlton Logo.png",
-    "Swansea City": "Swansea_City_A.F.C._logo.png",
+    "Coventry City": "Coventry_City_FC_crest.svg.png",
     "Derby County": "Derby_County_crest.svg.png",
+    "FC Burnley": "Burnley_FC_Logo.svg.png",
+    "FC Middlesbrough": "Middlesbrough_FC_crest.svg.png",
+    "FC Millwall": "Millwall_FC_crest.svg.png",
+    "FC Portsmouth": "Portsmouth_FC_logo.svg.png",
     "FC Southampton": "FC_Southampton.svg.png",
+    "FC Watford": "Watford.svg.png",
+    "Hull City": "Hull_City_A.F.C._logo.svg.png",
+    "Ipswich Town": "Ipswich_Town.svg.png",
+    "Leicester City": "Leicester_City_crest.svg.png",
+    "Lincoln City": "Lincoln_City_FC_2024_crest.svg.png",
+    "Norwich City": "Norwich_City.png",
+    "Oxford United": "Oxford_United_FC_logo.svg.png",
+    "Preston North End": "Preston_North_End_FC.svg.png",
+    "Queens Park Rangers": "Queens_Park_Rangers_crest.svg.png",
+    "Sheffield United": "Sheffield_United_FC_logo.svg.png",
+    "Sheffield Wednesday": "Sheffield_Wednesday_badge.svg.png",
     "Stoke City": "Stoke_City_FC.svg.png",
+    "Swansea City": "Swansea_City_A.F.C._logo.png",
+    "West Bromwich Albion": "West_Bromwich_Albion.svg.png",
+    "West Ham United": "West_Ham_United_FC_logo.svg.png",
+    "Wolverhampton Wanderers": "Wolverhampton_Wanderers.svg.png",
 }
 
 
