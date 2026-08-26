@@ -54,6 +54,18 @@ _KPI_FIELDS = [
 ]
 
 _EVENTS_SQL = """
+with player_names as (
+    -- PLAYERS is sliced per iteration, and a brand-new iteration's slice can
+    -- lag its first few fixtures (confirmed on Championship 26/27 iteration
+    -- 2114: Joel Piroe, scorer of West Ham's goal in match 267843, has no
+    -- row there at all despite ten other iterations carrying him) -- an
+    -- iteration-matched join on PLAYERS silently drops those names to NULL.
+    -- A player's name does not change across iterations, so look it up by
+    -- ID alone, deduplicated to one row per player.
+    select ID, coalesce(COMMONNAME, FIRSTNAME || ' ' || LASTNAME) as NAME
+    from CAFC_DB.IMPECT_RAW.PLAYERS
+    qualify row_number() over (partition by ID order by ITERATION_ID desc) = 1
+)
 select
     e.MATCH_ID as "matchId",
     m.ITERATIONID as "iterationId",
@@ -71,7 +83,7 @@ select
     sq.NAME as "squadName",
     e.PHASE as "phase",
     e.PLAYER_ID as "playerId",
-    coalesce(p.COMMONNAME, p.FIRSTNAME || ' ' || p.LASTNAME) as "playerName",
+    pn.NAME as "playerName",
     e.ACTION_TYPE as "actionType",
     e.ACTION as "action",
     e.RESULT as "result",
@@ -92,7 +104,7 @@ join CAFC_DB.IMPECT_RAW.ITERATIONS it on it.ID = m.ITERATIONID
 join CAFC_DB.IMPECT_RAW.SQUADS hs on hs.ID = m.HOMESQUADID and hs.ITERATION_ID = m.ITERATIONID
 join CAFC_DB.IMPECT_RAW.SQUADS aws on aws.ID = m.AWAYSQUADID and aws.ITERATION_ID = m.ITERATIONID
 left join CAFC_DB.IMPECT_RAW.SQUADS sq on sq.ID = e.SQUAD_ID and sq.ITERATION_ID = m.ITERATIONID
-left join CAFC_DB.IMPECT_RAW.PLAYERS p on p.ID = e.PLAYER_ID and p.ITERATION_ID = m.ITERATIONID
+left join player_names pn on pn.ID = e.PLAYER_ID
 where e.MATCH_ID = %(match_id)s
 order by e.EVENT_INDEX
 """

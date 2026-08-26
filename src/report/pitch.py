@@ -29,11 +29,15 @@ from mplsoccer import Pitch, VerticalPitch  # noqa: E402
 
 from src.report import palette  # noqa: E402
 from src.report.metrics import PassingNetwork  # noqa: E402
+from src.report.expanded import _fonts  # noqa: E402
+
+_fonts.register()
+plt.rcParams["font.family"] = _fonts.SANS
 
 _HALF_LEN, _HALF_WID = 52.5, 34.0
 _PITCH_LEN, _PITCH_WID = 105.0, 68.0
 
-_LABEL_FONT = "DejaVu Sans"
+_LABEL_FONT = _fonts.SANS
 
 
 def _to_pitch(x, y):
@@ -55,7 +59,7 @@ def _pitch_kwargs() -> dict:
         pitch_length=_PITCH_LEN,
         pitch_width=_PITCH_WID,
         pitch_color=palette.PAPER_2,
-        line_color=palette.HAIR,
+        line_color=palette.INK,
         linewidth=1.0,
         line_zorder=1,
         goal_type="line",
@@ -358,9 +362,10 @@ def entry_map(entries: pd.DataFrame, max_threat: float) -> str:
                      width=float(widths[i]), headwidth=4.0, headlength=4.2, alpha=0.9, zorder=3)
 
     n, ok = len(entries), int(success.sum())
-    carries = int((success & carry).sum())
+    final_third = int((entries["endPitchPosition"] == "FINAL_THIRD").sum()) if "endPitchPosition" in entries else 0
+    box = int((entries["endPitchPosition"] == "OPPONENT_BOX").sum()) if "endPitchPosition" in entries else 0
     ax.annotate(
-        f"{n} entries · {ok} completed ({ok / n * 100:.0f}%) · {carries} carried in",
+        f"{n} entries · {ok} completed ({ok / n * 100:.0f}%) · {final_third} final third · {box} box",
         (0.5, -0.015), xycoords="axes fraction", ha="center", va="top",
         fontsize=7.6, color=palette.MUTED, fontfamily=_LABEL_FONT,
     )
@@ -396,28 +401,22 @@ def average_position_map(avg_pos: pd.DataFrame, color: str, line_height: float =
     sx, sy = (ny, nx) if vertical else (nx, ny)
 
     # The dashed line shows how far up the pitch (from the team's own goal
-    # line) the back line's average position sits, in metres.
+    # line) the back line's average position sits, in metres. The caption
+    # itself is HTML text below the <img> now, not baked into the chart --
+    # keeping it outside the pitch's own cream background instead of sharing
+    # a canvas with it (see average_position_map's caller in render_combined.py
+    # and the template, which render "Defensive Line Height: {line_height}m").
     if line_height is not None and line_height > 0:
         line_fn = ax.axhline if vertical else ax.axvline
         line_fn(line_height, color=color, linestyle='--', linewidth=1.6, alpha=0.8, zorder=2)
-        label_xy = (_PITCH_WID - 1.5, line_height + 1.2) if vertical else (line_height, _PITCH_WID - 1.5)
-        ha, va = ("right", "bottom") if vertical else ("center", "top")
-        ax.annotate(
-            f"{line_height:.0f}m", label_xy,
-            ha=ha, va=va, zorder=4, fontsize=7.4, fontweight="bold",
-            color=color, fontfamily=_LABEL_FONT,
-            path_effects=[pe.withStroke(linewidth=2.4, foreground=palette.PAPER_2)],
-        )
 
-    pitch.scatter(nx, ny, s=300, color=color, marker='o',
+    pitch.scatter(nx, ny, s=420, color=color, marker='o',
                   edgecolors=palette.PAPER_2, linewidth=1.6, alpha=0.95, zorder=3, ax=ax)
 
-    halo = [pe.withStroke(linewidth=2.8, foreground=palette.PAPER_2)]
-    offsets = _label_offsets(sx.to_numpy(), sy.to_numpy())
-    for xi, yi, name, (dx, dy) in zip(sx, sy, avg_pos["playerName"], offsets):
-        ha = "center" if dx == 0 else ("left" if dx > 0 else "right")
-        ax.annotate(name.split()[-1], (xi + dx, yi + dy), ha=ha, va="top" if dy < 0 else "bottom",
-                    zorder=5, fontsize=8.4, fontweight="bold", color=palette.INK,
-                    fontfamily=_LABEL_FONT, path_effects=halo)
+    for xi, yi, name in zip(sx, sy, avg_pos["playerName"]):
+        parts = name.split()
+        initials = ((parts[0][0] + parts[-1][0]) if len(parts) > 1 else parts[0][:2]).upper()
+        ax.text(xi, yi, initials, ha="center", va="center", zorder=5, fontsize=7.4,
+                fontweight="bold", color="white", fontfamily=_LABEL_FONT)
 
     return _fig_to_uri(fig)

@@ -9,3 +9,5 @@ weasyprint>=62.0
 matplotlib>=3.8
 mplsoccer>=1.2.4
 pytest>=8.0
+pypdf>=5.0
+PyMuPDF>=1.24

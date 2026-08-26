@@ -254,6 +254,15 @@ def build_context(impect_match_id: int, dvms_opta_match_id: str | None = None,
             }
             if any(avg_pos[p][t].empty for p in avg_pos for t in avg_pos[p]):
                 raise ValueError("one or more tracked average-position panels are empty")
+            # DVMS tracking data's playerName is surname-only ("McNamara"), which
+            # produces initials inconsistent with the passing-network page's
+            # Impect-derived "First Last" -> two-letter codes (e.g. "DM" for
+            # Danny McNamara). Re-key by full Impect name so both pages agree.
+            name_by_surname = {str(n).split()[-1]: str(n) for n in events["playerName"].dropna().unique()}
+            for phase_frames in avg_pos.values():
+                for frame in phase_frames.values():
+                    if not frame.empty:
+                        frame["playerName"] = frame["playerName"].map(lambda s: name_by_surname.get(s, s))
             tracked_shapes = True
             panel_sources["average_positions"] = "DVMS tracking"
         except Exception as exc:
@@ -285,12 +294,14 @@ def build_context(impect_match_id: int, dvms_opta_match_id: str | None = None,
             "avg_pos_in": pitch.average_position_map(
                 avg_pos["in_possession"][team], color, line_height["in_possession"][team],
                 vertical=tracked_shapes),
+            "avg_pos_in_lh": line_height["in_possession"][team],
             "avg_pos_out": (
                 pitch.average_position_map(
                     avg_pos["out_of_possession"][team], color,
                     line_height["out_of_possession"][team], vertical=True,
                 ) if tracked_shapes else None
             ),
+            "avg_pos_out_lh": line_height["out_of_possession"][team] if tracked_shapes else None,
         }
 
     context: dict[str, Any] = {

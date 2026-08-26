@@ -52,6 +52,7 @@ _COUNTER_PRESS_WINDOW_S = 5.0
 def match_metrics(events: pd.DataFrame, team: str, opponent: str) -> dict[str, float]:
     stats = metrics.team_stats(events, team, opponent) if team < opponent else metrics.team_stats(events, opponent, team)
     row = stats.loc[team]
+    opp_row = stats.loc[opponent]
 
     t = events.loc[events["squadName"] == team].copy()
     o = events.loc[events["squadName"] == opponent].copy()
@@ -108,7 +109,17 @@ def match_metrics(events: pd.DataFrame, team: str, opponent: str) -> dict[str, f
         "set_piece_xg": float(row["set_piece_xg"]),
         "shots": float(row["shots"]),
         "packing_xt": float(t["PXT_ATTACK"].sum()),
-        "duels_won": float(row["won_ground_duels"] + row["won_aerial_duels"]),
+        # A win-rate, not a raw count: a team that spends the match without
+        # the ball (like a 23%-possession Charlton) gets far more chances to
+        # contest duels than a raw won-count reflects, so the count alone
+        # ranked purely on volume rather than duel quality. Every ground/
+        # aerial duel has exactly one winner, so the opponent's own won-duel
+        # count is the team's lost-duel count -- no separate query needed.
+        "duels_won_pct": float(
+            (row["won_ground_duels"] + row["won_aerial_duels"])
+            / max(row["won_ground_duels"] + row["won_aerial_duels"]
+                  + opp_row["won_ground_duels"] + opp_row["won_aerial_duels"], 1) * 100
+        ),
         "opposition_half_regains": float(row["opponent_half_regains"]),
         "progressive_actions": float(progressive_actions),
         "passes_into_final_third": float(passes_into_final_third),

@@ -31,3 +31,17 @@ command auto-discovers DVMS and preprocesses its tracking cache on first use.
 
 Run tests with `pytest -q`. Secrets belong in the ignored `.env`; `.env.example`
 documents the required keys.
+
+## Expanded analyst report
+
+Generate the 16-page DVMS-enriched analyst report with:
+
+```bash
+python generate_report_expanded.py --impect-match-id 267843 --dvms-match-id 2647272
+```
+
+The renderer discovers Chrome/Chromium on `PATH` and in standard install
+locations. Use `--chrome-bin PATH` or `CHROME_BIN` to select it explicitly.
+The West Ham report in `tests/golden/` is the production regression reference;
+compare a generated PDF with `python -m src.report.expanded.regression
+CANDIDATE GOLDEN --exact` when using the reference Chrome version.

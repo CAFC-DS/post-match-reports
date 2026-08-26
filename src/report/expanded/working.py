@@ -3,6 +3,8 @@ from __future__ import annotations
 import base64
 import datetime as dt
 import io
+import os
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -13,10 +15,12 @@ import numpy as np
 import pandas as pd
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from mplsoccer import Pitch, VerticalPitch
+from matplotlib.colors import LinearSegmentedColormap, PowerNorm
 from scipy.ndimage import gaussian_filter
 
 from src.report import impect_cafcdb_source, metrics, palette, pitch
 from src.report.render_combined import build_context as build_shared_context
+from src.report.expanded import _fonts
 from src.report.expanded import season_baseline as sb
 
 
@@ -28,8 +32,63 @@ def _heatmap_pitch_kwargs() -> dict:
                 pitch_color=palette.PAPER_2, line_color=palette.INK, linewidth=1.1,
                 line_zorder=3, goal_type="line")
 
+
+# The same smooth-gradient "thermal ramp" technique (fine bins + heavy
+# gaussian smoothing + this 8-stop colormap + PowerNorm contrast) that
+# full-season-analysis/src/report_engine/chart_builder.py uses for its own
+# density heatmaps -- replacing the old cmap="jet" + coarse-bin look, which
+# read as blocky and garish next to this report's warmer palette.
+_THERMAL_CMAP = LinearSegmentedColormap.from_list(
+    "thermal", ["#eff3f0", "#3b6ea5", "#3aa8a0", "#7ec850", "#f5d020", "#f08a24", "#e02418", "#7c0c0e"],
+)
+
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 TEMPLATES_DIR = Path(__file__).with_name("templates")
+
+
+class BrowserConfigurationError(RuntimeError):
+    """Raised when no usable Chrome/Chromium executable can be found."""
+
+
+def _default_chrome_candidates() -> tuple[Path, ...]:
+    return (
+        Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
+        Path("/Applications/Chromium.app/Contents/MacOS/Chromium"),
+        Path("C:/Program Files/Google/Chrome/Application/chrome.exe"),
+        Path("C:/Program Files (x86)/Google/Chrome/Application/chrome.exe"),
+    )
+
+
+def resolve_chrome(explicit: str | Path | None = None) -> Path:
+    """Resolve the browser used for the deterministic print-to-PDF step.
+
+    An explicit CLI value wins, then ``CHROME_BIN``, then executables on
+    ``PATH``, followed by common macOS/Windows install locations.
+    """
+    configured = explicit or os.environ.get("CHROME_BIN")
+    if configured:
+        path = Path(configured).expanduser()
+        if path.is_file():
+            return path.resolve()
+        raise BrowserConfigurationError(f"Chrome executable does not exist: {path}")
+
+    for name in ("google-chrome", "google-chrome-stable", "chromium", "chromium-browser"):
+        found = shutil.which(name)
+        if found:
+            return Path(found).resolve()
+    for path in _default_chrome_candidates():
+        if path.is_file():
+            return path.resolve()
+    raise BrowserConfigurationError(
+        "No Chrome/Chromium executable found. Pass --chrome-bin or set CHROME_BIN."
+    )
+
+
+def chrome_version(chrome: Path) -> str:
+    result = subprocess.run(
+        [str(chrome), "--version"], check=True, capture_output=True, text=True,
+    )
+    return result.stdout.strip() or result.stderr.strip()
 
 # Expanded report's fuller Match Stats panel (18 rows across 4 groups) vs the
 # canonical one-pager's 13-row metrics.STAT_ROWS -- kept local rather than
@@ -89,6 +148,8 @@ def _stat_rows_expanded(stats: pd.DataFrame, baseline_row: pd.Series, home: str,
         home_share = round(h / total * 100, 1) if total else 50.0
         charlton_value = h if home == charlton else a
         baseline_value = float(baseline_row[baseline_key]) if baseline_key is not None else None
+        home_wins = (h > a) if higher_is_better else (h < a)
+        away_wins = (a > h) if higher_is_better else (a < h)
         rows.append({
             "group": group if group != last_group else None,
             "label": label,
@@ -98,6 +159,13 @@ def _stat_rows_expanded(stats: pd.DataFrame, baseline_row: pd.Series, home: str,
             "away_share": round(100 - home_share, 1),
             "baseline": _fmt_expanded(key, baseline_value) if baseline_value is not None else "—",
             "shade": _shade(charlton_value, baseline_value, higher_is_better) if baseline_value is not None else None,
+            # Identity-based, not home/away-based: Charlton is always red / the
+            # opponent always grey in this table regardless of which side of
+            # the fixture Charlton happened to be on (a fixed home_wins/red
+            # mapping showed West Ham in red when West Ham were the home side).
+            "home_is_charlton": home == charlton,
+            "home_wins": home_wins if h != a else False,
+            "away_wins": away_wins if h != a else False,
         })
         last_group = group
     return rows
@@ -110,12 +178,12 @@ _PERFORMANCE_WHEEL_METRICS: list[tuple[str, str, str, bool]] = [
     ("attack", "packing_xt", "Packing xT", True),
     ("attack", "set_piece_xg", "Set-piece xG for", True),
     ("possession", "possession_pct", "Possession %", True),
-    ("possession", "passes_into_final_third", "Passes into final third", True),
-    ("possession", "progressive_actions", "Progressive actions", True),
     ("possession", "pass_accuracy_pct", "Pass accuracy %", True),
-    ("defend", "duels_won", "Duels won", True),
-    ("defend", "opposition_half_regains", "Opposition-half regains", True),
+    ("possession", "progressive_actions", "Progressive actions", True),
+    ("possession", "passes_into_final_third", "Passes into final third", True),
     ("defend", "pressing_intensity", "Pressing intensity", True),
+    ("defend", "opposition_half_regains", "Opposition-half\nregains", True),
+    ("defend", "duels_won_pct", "Duels Won %", True),
     ("defend", "counter_press_regains", "Counter-press regains", True),
 ]
 _WHEEL_COLORS = {"attack": palette.CHARLTON_RED, "possession": "#b5892a", "defend": "#4a4a46"}
@@ -128,6 +196,22 @@ _WHEEL_BG_COLORS = {"attack": "#f0cdc9", "possession": "#e8d5ae", "defend": "#c9
 def _uri(fig) -> str:
     buf = io.BytesIO()
     fig.savefig(buf, format="png", dpi=180, bbox_inches="tight", facecolor=palette.PAPER)
+    plt.close(fig)
+    return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
+
+
+def _uri_fixed(fig) -> str:
+    """Like _uri, but saves the full figure canvas at its exact figsize
+    instead of cropping to a tight bbox around the drawn content. Match Flow
+    and xG Race (page 3) share one 0-95 minute x-axis and must line up when
+    stacked -- tight-bbox cropping trims each figure's margins differently
+    depending on that figure's own label/legend/annotation extents, so even
+    identical figsize + identical xlim charts land with the x=0 tick at a
+    different fraction of image width once saved. A fixed canvas with
+    identical subplots_adjust margins on both charts keeps that fraction
+    the same on both, so they align."""
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=200, facecolor=palette.PAPER)
     plt.close(fig)
     return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
 
@@ -147,7 +231,7 @@ def _event_map(frame: pd.DataFrame, color: str, title: str = "") -> str:
     return _uri(fig)
 
 
-def _pressure_activity(pressure_events: pd.DataFrame) -> tuple[str, dict[str, Any]]:
+def _pressure_activity(pressure_events: pd.DataFrame, events: pd.DataFrame) -> tuple[str, dict[str, Any]]:
     """Full-pitch pressure-density heatmap plus the KPI strip underneath it.
 
     ``pressure_events`` rows are located at the ball carrier's own adjusted
@@ -168,15 +252,26 @@ def _pressure_activity(pressure_events: pd.DataFrame) -> tuple[str, dict[str, An
     fig, ax = pitch_obj.draw(figsize=(5.6, 8.6))
     fig.set_facecolor(palette.PAPER_2)
     px, py = pitch._to_pitch(x, y)
-    bin_stat = pitch_obj.bin_statistic(px, py, statistic="count", bins=(8, 12))
-    bin_stat["statistic"] = gaussian_filter(bin_stat["statistic"], 0.8)
-    pitch_obj.heatmap(bin_stat, ax=ax, cmap="jet", edgecolors="none", alpha=0.78, zorder=1)
+    bin_stat = pitch_obj.bin_statistic(px, py, statistic="count", bins=(20, 30))
+    bin_stat["statistic"] = gaussian_filter(bin_stat["statistic"], 1.6)
+    vmax = float(bin_stat["statistic"].max()) or 1.0
+    pitch_obj.heatmap(bin_stat, ax=ax, cmap=_THERMAL_CMAP, edgecolors="none", alpha=0.92,
+                       norm=PowerNorm(0.6, vmin=0, vmax=vmax), zorder=1)
 
     top = pressure_events.groupby("playerName").size().sort_values(ascending=False)
+    n = len(pressure_events)
+    # Forced turnover rate: of the actions this team pressed, what share did
+    # the ball carrier actually lose (result == FAIL)? Replaces "opposition-
+    # half share", which just restated where the team's press was applied --
+    # already shown by the heatmap itself -- without saying whether any of
+    # it actually worked.
+    pressed_results = pressure_events.merge(events[["eventId", "result"]], on="eventId", how="left")
+    forced_pct = round(float((pressed_results["result"] == "FAIL").mean() * 100)) if n else 0
     kpis = {
-        "pressure_n": len(pressure_events),
-        "opp_half_pct": round(float((x > 0).mean() * 100)) if len(x) else 0,
+        "pressure_n": n,
+        "forced_pct": forced_pct,
         "opp_third_n": int((x > 17.5).sum()),
+        "per_min": round(n / 90, 1),
         "top_name": str(top.index[0]).split()[-1] if len(top) else "—",
         "top_n": int(top.iloc[0]) if len(top) else 0,
     }
@@ -200,19 +295,27 @@ def _local_passing_network_map(net: "metrics.PassingNetwork", max_edge_passes: i
         ax_, ay_ = pitch._to_pitch(net.edges["ax"], net.edges["ay"])
         bx_, by_ = pitch._to_pitch(net.edges["bx"], net.edges["by"])
         edge_pxt = net.edges["pxt"] if "pxt" in net.edges.columns else pd.Series(0.0, index=net.edges.index)
-        edge_colors = pitch._threat_colors(edge_pxt, max_abs_edge_pxt) if max_abs_edge_pxt else \
+        # Perceptual stretch (sqrt of magnitude, sign preserved), not a
+        # linear normalise: on the shared match scale, one team's worst
+        # combination is often small next to the OTHER team's best one, so a
+        # linear map leaves every edge within a few % of the neutral
+        # midpoint -- technically still a gradient, but reads as flat grey.
+        # This still respects sign and shared scale, just makes small
+        # departures from neutral visible instead of washed out.
+        edge_t = np.sign(edge_pxt) * (edge_pxt.abs() / max_abs_edge_pxt).pow(0.55) if max_abs_edge_pxt else edge_pxt * 0
+        edge_colors = pitch._threat_colors(edge_t, 1.0) if max_abs_edge_pxt else \
             [palette.MUTED] * len(net.edges)
         for i in range(len(net.edges)):
             n = int(net.edges["passes"].iloc[i])
             frac = n / max_edge_passes if max_edge_passes else 0.0
             ax.plot([ax_.iloc[i], bx_.iloc[i]], [ay_.iloc[i], by_.iloc[i]],
-                    color=edge_colors[i], linewidth=0.9 + 5.6 * frac, alpha=0.5 + 0.4 * frac,
+                    color=edge_colors[i], linewidth=1.1 + 6.4 * frac, alpha=0.82 + 0.18 * frac,
                     solid_capstyle="round", zorder=2)
 
     nx, ny = pitch._to_pitch(net.nodes["x"], net.nodes["y"])
     passes = net.nodes["passes"].to_numpy()
     top = passes.max() if len(passes) else 1
-    sizes = 150 + 480 * (passes / top)
+    sizes = 220 + 620 * (passes / top)
     node_colors = pitch._threat_colors(net.nodes["threat"], max_abs_threat)
     is_starter = net.nodes["is_starter"].to_numpy()
     for mask, marker in ((is_starter, "o"), (~is_starter, "^")):
@@ -245,6 +348,23 @@ def _duel_location_map(duels: pd.DataFrame, team: str, duel_type: str) -> str:
     return _uri(fig)
 
 
+def _duel_split_kpis(duels: pd.DataFrame, team: str) -> dict[str, Any]:
+    """Aerial/ground share of this team's total duel volume, and the three
+    players most involved in duels (either type, won or lost) -- the two
+    captions under the reference's page 12 duel-performance panel."""
+    t = duels.loc[duels["squadName"] == team]
+    n = len(t)
+    aerial_n = int((t["duel_type"] == "AERIAL").sum())
+    ground_n = int((t["duel_type"] == "GROUND").sum())
+    top = t.groupby("playerName").size().sort_values(ascending=False).head(3)
+    most_involved = " · ".join(f"{name.split()[-1]} {int(count)}" for name, count in top.items())
+    return {
+        "aerial_pct": round(aerial_n / n * 100) if n else 0,
+        "ground_pct": round(ground_n / n * 100) if n else 0,
+        "most_involved": most_involved,
+    }
+
+
 def _entries_kpis(events: pd.DataFrame, team: str) -> dict[str, Any]:
     """Final-third/box entry counts for the caption under the entries map --
     reuses metrics.zone_entries (already powering the map image itself via
@@ -259,6 +379,61 @@ def _entries_kpis(events: pd.DataFrame, team: str) -> dict[str, Any]:
         "final_third": int((entries["endPitchPosition"] == "FINAL_THIRD").sum()) if n else 0,
         "box": int((entries["endPitchPosition"] == "OPPONENT_BOX").sum()) if n else 0,
     }
+
+
+def _player_threat_ranking(events: pd.DataFrame, charlton: str, opponent: str) -> tuple[str, dict[str, str]]:
+    """Open-play creation (pass + carry PXT_ATTACK, goals excluded), top 6 per
+    team, as two side-by-side panels.
+
+    Sums *positive* PXT_ATTACK only (clipped at 0), matching the convention
+    the rest of this report already uses for 'creation' (the Threat Density
+    Map's caption, packing_xt in the stats table) -- summing the raw signed
+    value included every backward/lateral pass's small threat *loss* too,
+    which pushed both teams' totals net negative match-wide and made the
+    ranking read as nonsensical (a team that scored twice showing as
+    net-negative 'creators'). Positive-only is what 'creation' means here.
+
+    The per-team name and team-total headers are returned as plain text
+    rather than drawn onto the figure: every other panel in this report
+    keeps that kind of caption in HTML (e.g. the Threat Density Map's
+    "positive PXT Attack · actions" line), which renders in the report's
+    real type system instead of a raster matplotlib title competing with
+    the panel's own HTML header for visual weight."""
+    t = events.loc[events["actionType"].isin(["PASS", "DRIBBLE"]) & (events["action"] != "GOAL")].copy()
+    t["pxt_pos"] = t["PXT_ATTACK"].clip(lower=0)
+    g = t.groupby(["playerName", "squadName"])["pxt_pos"].sum().reset_index()
+    g["surname"] = g["playerName"].apply(lambda n: str(n).split()[-1])
+    team_totals = g.groupby("squadName")["pxt_pos"].sum()
+    vmax = float(g["pxt_pos"].max()) or 1.0
+
+    # This panel sits in a short, wide card (~5.9:1) -- the previous 19x6.4
+    # figure (2.97:1) was much taller than the card needed, so `object-fit:
+    # contain` shrank it to fit the height and left most of the card blank.
+    fig, axes = plt.subplots(1, 2, figsize=(19.0, 3.4), facecolor=palette.PAPER)
+    fig.subplots_adjust(left=0.09, right=0.97, top=0.94, bottom=0.18, wspace=0.4)
+    totals: dict[str, str] = {}
+    for ax, team, color in zip(axes, (charlton, opponent), (palette.CHARLTON_RED, palette.OPPONENT_GREY)):
+        top = g.loc[g["squadName"] == team].sort_values("pxt_pos", ascending=False).head(5)
+        total = team_totals[team] or 1.0
+        y = np.arange(len(top))[::-1] * 1.4
+        ax.set_facecolor(palette.PAPER)
+        ax.barh(y, top["pxt_pos"], color=color, alpha=0.9, zorder=2, height=0.8)
+        for yi, val in zip(y, top["pxt_pos"]):
+            ax.text(val + vmax * 0.035, yi, f"{val:.3f}  ({val / total * 100:.0f}%)", va="center",
+                    ha="left", fontsize=13, fontweight="bold", color=palette.INK)
+        ax.set_yticks(y); ax.set_yticklabels(top["surname"], fontsize=14, fontweight="bold")
+        ax.set_xlim(0, vmax * 1.5)
+        xticks = np.linspace(0, vmax, 4)
+        ax.set_xticks(xticks); ax.set_xticklabels([f"{v:.2f}" for v in xticks], fontsize=10, color=palette.MUTED)
+        ax.set_xlabel("Positive PXT Attack (pass + carry)", fontsize=10, color=palette.MUTED)
+        ax.spines[["top", "right", "left"]].set_visible(False)
+        ax.spines["bottom"].set_color(palette.HAIR)
+        ax.tick_params(axis="y", length=0)
+        ax.tick_params(axis="x", length=3, colors=palette.MUTED)
+        ax.grid(axis="x", color=palette.HAIR_SOFT, lw=0.5, zorder=1)
+        ax.set_axisbelow(True)
+        totals[team] = f"{total:.2f}"
+    return _uri_fixed(fig), totals
 
 
 def _regains_panel(events: pd.DataFrame, team: str, baseline: pd.DataFrame) -> tuple[str, dict[str, Any], pd.Series]:
@@ -286,7 +461,7 @@ def _regains_panel(events: pd.DataFrame, team: str, baseline: pd.DataFrame) -> t
         return not (between["squadName"] != team).any()
 
     led = regains["gameTimeInSec"].map(led_to_shot) if len(regains) else pd.Series(dtype=bool)
-    pitch_obj, fig, ax = pitch._vertical_pitch((5.6, 7.4))
+    pitch_obj, fig, ax = pitch._half_pitch((5.6, 7.4))
     x, y = pitch._to_pitch(regains["startAdjCoordinatesX"], regains["startAdjCoordinatesY"])
     pitch_obj.scatter(x, y, ax=ax, s=32, color=palette.CHARLTON_RED, alpha=0.75, zorder=2)
     if led.any():
@@ -395,7 +570,7 @@ def _transition_response_map(events: pd.DataFrame, team: str, opponent: str) -> 
         pitch_obj.scatter(cx, cy, ax=ax, s=60, color=palette.SUCCESS_GREEN, marker="^", edgecolors=palette.PAPER_2, linewidth=0.6, zorder=3)
     if led_to_shot_mask.any():
         sx, sy = pitch._to_pitch(high_losses.loc[led_to_shot_mask, "startAdjCoordinatesX"], high_losses.loc[led_to_shot_mask, "startAdjCoordinatesY"])
-        pitch_obj.scatter(sx, sy, ax=ax, s=110, facecolors="none", edgecolors=palette.INK, linewidth=1.4, zorder=4)
+        pitch_obj.scatter(sx, sy, ax=ax, s=90, color=palette.INK, marker="x", linewidth=2.2, zorder=4)
 
     n = len(high_losses)
     shot_n = int(led_to_shot_mask.sum())
@@ -408,14 +583,23 @@ def _transition_response_map(events: pd.DataFrame, team: str, opponent: str) -> 
     return _uri(fig), kpis
 
 
-def _bars(labels: list[str], values: list[float], color: str) -> str:
-    fig, ax=plt.subplots(figsize=(8.4,4.2),facecolor=palette.PAPER)
+def _bars(labels: list[str], values: list[float], color: str, total: int | None = None) -> str:
+    fig, ax=plt.subplots(figsize=(11.0,4.6),facecolor=palette.PAPER)
+    fig.subplots_adjust(left=0.14,right=0.96,top=0.96,bottom=0.1)
     ax.set_facecolor(palette.PAPER)
     order=np.argsort(values)
-    ax.barh(np.array(labels)[order],np.array(values)[order],color=color,alpha=.88)
-    ax.spines[:].set_visible(False); ax.grid(axis="x",color=palette.HAIR,alpha=.55)
-    ax.tick_params(labelsize=8,colors=palette.INK); ax.set_axisbelow(True)
-    return _uri(fig)
+    lbls, vals = np.array(labels)[order], np.array(values)[order]
+    ax.barh(lbls, vals, color=color, alpha=.9, height=0.68, zorder=2)
+    vmax = float(vals.max()) or 1.0
+    for i, v in enumerate(vals):
+        text = f"{int(v)}" if not total else f"{int(v)}  ({v / total * 100:.0f}%)"
+        ax.text(v + vmax * 0.02, i, text, va="center", ha="left", fontsize=11, fontweight="bold", color=palette.INK)
+    ax.set_xlim(0, vmax * 1.3 if total else vmax * 1.15)
+    ax.spines[:].set_visible(False); ax.grid(axis="x",color=palette.HAIR,alpha=.55, zorder=1)
+    ax.set_xticks([])
+    ax.tick_params(labelsize=11, colors=palette.INK, length=0)
+    ax.set_axisbelow(True)
+    return _uri_fixed(fig)
 
 
 # Exact colors sampled from the reference PDF's own vector-drawn bars
@@ -437,7 +621,8 @@ def _chance_source_stacked(chances: pd.DataFrame, charlton: str, opponent: str) 
     docstring explains is the right call for the *canonical* one-page
     report but not for this one (see chart.py:149-162)."""
     phases = list(chances.index)  # Set piece, Transition, Open play, Second ball (bottom to top)
-    fig, ax = plt.subplots(figsize=(2.6, 4.4), facecolor=palette.PAPER)
+    fig, ax = plt.subplots(figsize=(4.4, 5.6), facecolor=palette.PAPER)
+    fig.subplots_adjust(left=0.16, right=0.97, top=0.98, bottom=0.08)
     ax.set_facecolor(palette.PAPER)
     teams = [charlton, opponent]
     totals = {team: float(chances[team].sum()) for team in teams}
@@ -448,16 +633,16 @@ def _chance_source_stacked(chances: pd.DataFrame, charlton: str, opponent: str) 
             value = float(chances.at[phase, team])
             total = totals[team] or 1.0
             share_pct = value / total * 100
-            ax.bar(xi, share_pct, bottom=bottoms[team], color=color, width=0.62, zorder=2)
+            ax.bar(xi, share_pct, bottom=bottoms[team], color=color, width=0.66, zorder=2)
             if share_pct > 4:
                 ax.text(xi, bottoms[team] + share_pct / 2, f"{share_pct:.0f}%\n{value:.2f}",
-                        ha="center", va="center", fontsize=6.2, fontweight="bold", color="white")
+                        ha="center", va="center", fontsize=9, fontweight="bold", color="white")
             bottoms[team] += share_pct
-    ax.set_xticks([0, 1]); ax.set_xticklabels([t.replace(" ", "\n") for t in teams], fontsize=7.5, fontweight="bold")
+    ax.set_xticks([0, 1]); ax.set_xticklabels([t.replace(" ", "\n") for t in teams], fontsize=10.5, fontweight="bold")
     ax.set_ylim(0, 100); ax.set_yticks([0, 20, 40, 60, 80, 100])
-    ax.tick_params(labelsize=6.5, colors=palette.MUTED)
+    ax.tick_params(labelsize=9, colors=palette.MUTED)
     ax.spines[["top", "right"]].set_visible(False)
-    ax.set_ylabel("Share of non-penalty xG (%)", fontsize=6.5, color=palette.MUTED)
+    ax.set_ylabel("Share of non-penalty xG (%)", fontsize=9, color=palette.MUTED)
 
     top_source = {team: chances[team].idxmax() for team in teams}
     kpis = {
@@ -496,32 +681,32 @@ def _duel_bars_by_type(duels: pd.DataFrame, charlton: str, opponent: str, duel_t
     # data-driven max -- both duel-type panels on that page share one scale.
     x_max = 15.0
 
-    fig, axes = plt.subplots(1, 2, figsize=(11.5, 4.9), facecolor=palette.PAPER)
-    fig.text(0.5, 0.97, "LOST ←        → WON", ha="center", va="top", fontsize=7.5, color=palette.MUTED)
+    fig, axes = plt.subplots(1, 2, figsize=(18.5, 5.7), facecolor=palette.PAPER)
+    fig.subplots_adjust(left=0.08, right=0.98, top=0.82, bottom=0.1, wspace=0.3)
+    fig.text(0.5, 0.96, "LOST  ←            →  WON", ha="center", va="top", fontsize=12, color=palette.MUTED)
     for ax, team, frame in zip(axes, (charlton, opponent), (c, o)):
         ax.set_facecolor(palette.PAPER)
-        y = np.arange(len(frame))[::-1]
-        ax.barh(y, frame["won"], color=palette.SUCCESS_GREEN, alpha=0.9, zorder=2)
-        ax.barh(y, -frame["lost"], color=palette.FAIL_REDGREY, alpha=0.9, zorder=2)
+        y = np.arange(len(frame))[::-1] * 1.3
+        ax.barh(y, frame["won"], color=palette.SUCCESS_GREEN, alpha=0.9, zorder=2, height=0.9)
+        ax.barh(y, -frame["lost"], color=palette.FAIL_REDGREY, alpha=0.9, zorder=2, height=0.9)
         for yi, w, l in zip(y, frame["won"], frame["lost"]):
-            if l: ax.text(-l - x_max * 0.03, yi, f"{int(l)}", ha="right", va="center", fontsize=7, color=palette.FAIL_REDGREY)
-            if w: ax.text(w + x_max * 0.03, yi, f"{int(w)}", ha="left", va="center", fontsize=7, color=palette.SUCCESS_GREEN)
-        ax.set_yticks(y); ax.set_yticklabels(frame["surname"], fontsize=8, fontweight="bold")
+            if l: ax.text(-l - x_max * 0.035, yi, f"{int(l)}", ha="right", va="center", fontsize=11, fontweight="bold", color=palette.FAIL_REDGREY)
+            if w: ax.text(w + x_max * 0.035, yi, f"{int(w)}", ha="left", va="center", fontsize=11, fontweight="bold", color=palette.SUCCESS_GREEN)
+        ax.set_yticks(y); ax.set_yticklabels(frame["surname"], fontsize=12, fontweight="bold")
         ax.set_xlim(-x_max, x_max)
         ticks = [-15, -10, -5, 0, 5, 10, 15]
-        ax.set_xticks(ticks); ax.set_xticklabels([str(abs(t)) for t in ticks], fontsize=6.5, color=palette.MUTED)
+        ax.set_xticks(ticks); ax.set_xticklabels([str(abs(t)) for t in ticks], fontsize=9, color=palette.MUTED)
         ax.grid(axis="x", color=palette.HAIR_SOFT, lw=0.5, zorder=1)
         ax.axvline(0, color=palette.INK, lw=1, zorder=3)
-        ax.set_title(team, fontsize=9, fontweight="bold",
+        ax.set_title(team, fontsize=13, fontweight="bold", pad=10,
                      color=palette.CHARLTON_RED if team == charlton else palette.OPPONENT_GREY)
         ax.spines[:].set_visible(False)
+        ax.tick_params(length=0)
     from matplotlib.patches import Patch
     handles = [Patch(color=palette.SUCCESS_GREEN, label="Won"), Patch(color=palette.FAIL_REDGREY, label="Lost")]
-    fig.legend(handles=handles, loc="lower center", ncol=2, frameon=False, fontsize=7,
-               bbox_to_anchor=(0.5, -0.02))
-    fig.text(0.62, -0.02, "Bars are mirrored around zero; labels show counts", ha="left", va="center",
-              fontsize=6.5, color=palette.MUTED)
-    return _uri(fig)
+    fig.legend(handles=handles, loc="lower center", ncol=2, frameon=False, fontsize=10,
+               bbox_to_anchor=(0.5, 0.005))
+    return _uri_fixed(fig)
 
 
 def _performance_wheel(match_values: dict[str, float], baseline: pd.DataFrame) -> str:
@@ -535,7 +720,7 @@ def _performance_wheel(match_values: dict[str, float], baseline: pd.DataFrame) -
     metrics_list = _PERFORMANCE_WHEEL_METRICS
     n = len(metrics_list)
     theta = np.linspace(0, 2 * np.pi, n, endpoint=False)
-    width = 2 * np.pi / n * 0.86
+    width = 2 * np.pi / n * 0.96
     pcts, colors, bg_colors, labels = [], [], [], []
     for category, col, label, higher_is_better in metrics_list:
         value = match_values[col]
@@ -547,20 +732,26 @@ def _performance_wheel(match_values: dict[str, float], baseline: pd.DataFrame) -
         bg_colors.append(_WHEEL_BG_COLORS[category])
         labels.append(label)
 
-    inner_radius = 6.0  # donut-hole radius, in the same units as the 0-100 percentile axis
+    inner_radius = 0.6  # near-zero: a full pie from the centre, not a donut
     fig, ax = plt.subplots(figsize=(6.6, 6.6), subplot_kw={"projection": "polar"}, facecolor=palette.PAPER)
     ax.set_facecolor(palette.PAPER); ax.set_theta_offset(np.pi / 2); ax.set_theta_direction(-1)
     ax.bar(theta, [100 - inner_radius] * n, bottom=inner_radius, width=width, color=bg_colors, alpha=1.0, zorder=1,
-           edgecolor=palette.PAPER, linewidth=1.5)
+           edgecolor=palette.PAPER, linewidth=1.2)
     ax.bar(theta, [max(0.0, p - inner_radius) for p in pcts], bottom=inner_radius, width=width, color=colors,
-           alpha=1.0, zorder=2, edgecolor=palette.PAPER, linewidth=1.5)
-    for t, p, c in zip(theta, pcts, colors):
-        label_r = max(p, inner_radius + 8)
-        ax.text(t, label_r, f"{p:.0f}", ha="center", va="center", fontsize=6.5, fontweight="bold",
-                 color="white", zorder=3,
-                 bbox=dict(boxstyle="round,pad=0.28", facecolor=c, edgecolor="none", alpha=0.96))
-    ax.set_ylim(0, 108)
-    ax.set_xticks(theta); ax.set_xticklabels(labels, fontsize=6)
+           alpha=1.0, zorder=2, edgecolor=palette.PAPER, linewidth=1.2)
+    for t, p in zip(theta, pcts):
+        # Small values read better labelled just outside their short wedge,
+        # in dark text on the pale background; larger ones sit inside the
+        # wedge itself, in white, matching the plain-text (no pill) style.
+        if p >= 25:
+            label_r, color = p * 0.8, "white"
+        else:
+            label_r, color = p + 7, palette.INK
+        ax.text(t, label_r, f"{p:.0f}", ha="center", va="center", fontsize=7, fontweight="bold",
+                 color=color, zorder=3)
+    ax.set_ylim(0, 112)
+    ax.set_xticks(theta); ax.set_xticklabels(labels, fontsize=8.2, fontweight="bold", color=palette.INK)
+    ax.tick_params(axis="x", pad=10)
     ax.set_yticklabels([])
     ax.grid(color=palette.HAIR, lw=0.6, linestyle=(0, (2, 2)))
     ax.spines["polar"].set_visible(False)
@@ -606,18 +797,35 @@ def _xg_race(events: pd.DataFrame, teams: list[str]) -> str:
     60'/75'/90', chart_dvms.territory_chart's own convention), not
     matplotlib's default 0/20/40/60/80 -- the reference's two charts on this
     page share one axis convention."""
-    fig,ax=plt.subplots(figsize=(11.5,3.8),facecolor=palette.PAPER)
+    fig,ax=plt.subplots(figsize=(16.0,3.5),facecolor=palette.PAPER)
+    fig.subplots_adjust(left=0.07,right=0.99,top=0.92,bottom=0.18)
     ax.set_facecolor(palette.PAPER)
+    cum_by_team = {}
     for team,color in zip(teams,[palette.CHARLTON_RED,palette.OPPONENT_GREY]):
         s=metrics.shot_events(events); s=s.loc[s["squadName"]==team].copy()
         s["minute"]=s["gameTime"].map(metrics.minute_num); s=s.sort_values("minute")
-        x=[0]+s["minute"].tolist()+[95]; y=[0]+s["SHOT_XG"].cumsum().tolist(); y=y+[y[-1]]
+        s["cum"]=s["SHOT_XG"].cumsum()
+        cum_by_team[team]=s
+        x=[0]+s["minute"].tolist()+[95]; y=[0]+s["cum"].tolist(); y=y+[y[-1]]
         ax.step(x,y,where="post",label=team,color=color,lw=2)
+    goals = events.loc[events["action"] == "GOAL"].sort_values("gameTimeInSec")
+    for _, g in goals.iterrows():
+        s = cum_by_team.get(str(g["squadName"]))
+        if s is None or s.empty:
+            continue
+        g_minute = metrics.minute_num(str(g["gameTime"]))
+        prior = s.loc[s["minute"] <= g_minute]
+        y_at = float(prior.iloc[-1]["cum"]) if not prior.empty else 0.0
+        ax.scatter([g_minute], [y_at], s=42, color=palette.INK, zorder=5,
+                   edgecolors=palette.PAPER, linewidth=0.8)
+        ax.annotate(str(g["playerName"]).split()[-1], (g_minute, y_at), xytext=(0, 7), textcoords="offset points",
+                    fontsize=7, fontweight="bold", color=palette.INK, ha="center", zorder=5)
     ax.set_xlim(0,95); ax.spines[["top","right"]].set_visible(False); ax.grid(color=palette.HAIR_SOFT,lw=.6)
     ax.set_xticks([0, 15, 30, 45, 60, 75, 90])
     ax.set_xticklabels(["0'", "15'", "30'", "HT", "60'", "75'", "90'"])
+    ax.set_ylabel("Cumulative\nnon-penalty xG", fontsize=7.5, color=palette.MUTED, linespacing=1.4)
     ax.tick_params(labelsize=7,colors=palette.MUTED); ax.legend(frameon=False,fontsize=7,loc="upper left")
-    return _uri(fig)
+    return _uri_fixed(fig)
 
 
 def _threat_heatmap(events: pd.DataFrame, team: str) -> tuple[str, float, int]:
@@ -630,9 +838,11 @@ def _threat_heatmap(events: pd.DataFrame, team: str) -> tuple[str, float, int]:
     fig, ax = pitch_obj.draw(figsize=(5.2, 7.4))
     fig.set_facecolor(palette.PAPER_2)
     x, y = pitch._to_pitch(t["startAdjCoordinatesX"], t["startAdjCoordinatesY"])
-    bin_stat = pitch_obj.bin_statistic(x, y, values=t["PXT_ATTACK"], statistic="sum", bins=(12, 18))
-    bin_stat["statistic"] = gaussian_filter(bin_stat["statistic"], 1.4)
-    pitch_obj.heatmap(bin_stat, ax=ax, cmap="jet", edgecolors="none", alpha=0.62, zorder=1)
+    bin_stat = pitch_obj.bin_statistic(x, y, values=t["PXT_ATTACK"], statistic="sum", bins=(24, 34))
+    bin_stat["statistic"] = gaussian_filter(bin_stat["statistic"], 1.8)
+    vmax = float(bin_stat["statistic"].max()) or 1.0
+    pitch_obj.heatmap(bin_stat, ax=ax, cmap=_THERMAL_CMAP, edgecolors="none", alpha=0.92,
+                       norm=PowerNorm(0.6, vmin=0, vmax=vmax), zorder=1)
     return _uri(fig), round(float(t["PXT_ATTACK"].sum()), 2), len(t)
 
 
@@ -659,22 +869,27 @@ def _initials(name: str) -> str:
     return "".join(p[0] for p in parts if p).upper()[:2] if parts else "?"
 
 
-def _starters_only_network(net: "metrics.PassingNetwork") -> "metrics.PassingNetwork":
+def _starters_only_network(net: "metrics.PassingNetwork", events: pd.DataFrame, team: str) -> "metrics.PassingNetwork":
     """Reference page 5's caption reads 'starting XI · shared match scales' —
     the eleven who began the game, not the whole squad that touched the ball.
-    Also adds a per-edge 'pxt' column so the local passing-network chart can
-    colour edges by threat, matching the reference legend's 'Link Colour =
-    Pair Passing Threat' -- metrics.passing_network's edges DataFrame has no
-    pair-level threat sum today, and deriving one properly means re-tracing
-    the underlying pass events, which is out of scope here; edges render at
-    the diverging scale's neutral midpoint until that's built (known
-    simplification, not a silent gap)."""
+    Also computes a real per-edge 'pxt' column (net PXT_ATTACK summed over
+    every completed pass between that pair, either direction) so the local
+    passing-network chart's edges actually colour by pair threat instead of
+    rendering at the diverging scale's flat neutral midpoint -- the previous
+    version left this as a documented placeholder (edges["pxt"] = 0.0)."""
     starter_names = set(net.nodes.loc[net.nodes["is_starter"], "playerName"])
     nodes = net.nodes.loc[net.nodes["playerName"].isin(starter_names)].copy()
     nodes["surname"] = nodes["playerName"].map(_initials)
     edges = net.edges.loc[net.edges["a"].isin(starter_names) & net.edges["b"].isin(starter_names)].copy()
-    if not edges.empty and "pxt" not in edges.columns:
-        edges["pxt"] = 0.0
+    if not edges.empty:
+        passes = events.loc[
+            (events["squadName"] == team) & (events["actionType"] == "PASS") & (events["result"] == "SUCCESS")
+            & events["playerName"].notna() & (events["playerName"] != "nan")
+            & events["passReceiverPlayerName"].notna() & (events["passReceiverPlayerName"] != "nan")
+        ]
+        pair_key = [tuple(sorted((a, b))) for a, b in zip(passes["playerName"], passes["passReceiverPlayerName"])]
+        pxt_by_pair = passes.assign(_pair=pair_key).groupby("_pair")["PXT_ATTACK"].sum()
+        edges["pxt"] = [pxt_by_pair.get(tuple(sorted((a, b))), 0.0) for a, b in zip(edges["a"], edges["b"])]
     return metrics.PassingNetwork(nodes, edges, net.first_sub_minute, net.total_passes)
 
 
@@ -746,7 +961,7 @@ def build_context(impect_match_id: int, dvms_match_id: str | None = None) -> dic
     opponent=context["meta"]["opponent_team"]
     teams=[subject,opponent]
     side_by_team={s["team"]:s for s in context["sides"]}
-    nets={team:_starters_only_network(metrics.passing_network(events,team)) for team in teams}
+    nets={team:_starters_only_network(metrics.passing_network(events,team),events,team) for team in teams}
     mx=max([int(n.edges["passes"].max()) for n in nets.values() if len(n.edges)] or [1])
     mt=max([float(n.nodes["threat"].abs().max()) for n in nets.values() if len(n.nodes)] or [.001])
     met=max([float(n.edges["pxt"].abs().max()) for n in nets.values() if len(n.edges)] or [.001])
@@ -760,6 +975,7 @@ def build_context(impect_match_id: int, dvms_match_id: str | None = None) -> dic
     team_stats=metrics.team_stats(events,home,away)
     chances=metrics.chance_sources(events,home,away)
     chance_source_img,chance_source_kpis=_chance_source_stacked(chances,subject,opponent)
+    player_threat_ranking_img,player_threat_ranking_totals=_player_threat_ranking(events,subject,opponent)
     baseline_row=baseline.mean(numeric_only=True)
     stat_rows_expanded=_stat_rows_expanded(team_stats,baseline_row,home,away,subject)
     # Reuse season_baseline's own per-match metric builder wholesale so the
@@ -773,7 +989,7 @@ def build_context(impect_match_id: int, dvms_match_id: str | None = None) -> dic
     speed_opponent=_transition_speed_mps(events,opponent,dvms_match)
     threat_img,threat_pxt,threat_actions=_threat_heatmap(events,subject)
     entries_kpis=_entries_kpis(events,subject)
-    pressure_img,pressure_kpis=_pressure_activity(pressure_events.loc[pressure_events["squadName"]==subject])
+    pressure_img,pressure_kpis=_pressure_activity(pressure_events.loc[pressure_events["squadName"]==subject],events)
     transition_img,transition_kpis=_transition_response_map(events,subject,opponent)
     context.update({
         "generated_date":dt.date.today().strftime("%d %B %Y"),
@@ -786,9 +1002,12 @@ def build_context(impect_match_id: int, dvms_match_id: str | None = None) -> dic
         "threat_img":threat_img,"threat_pxt":threat_pxt,"threat_actions":threat_actions,
         "entries_kpis":entries_kpis,
         "chance_source_img":chance_source_img,"chance_source_kpis":chance_source_kpis,
+        "player_threat_ranking_img":player_threat_ranking_img,
+        "player_threat_ranking_totals":player_threat_ranking_totals,
         "pressure_img":pressure_img,"pressure_kpis":pressure_kpis,
         "ground_duel_img":_duel_location_map(duel_involvement,subject,"GROUND"),
         "aerial_duel_img":_duel_location_map(duel_involvement,subject,"AERIAL"),
+        "duel_split_kpis":_duel_split_kpis(duel_involvement,subject),
         "regain_img":regain_img,"regain_kpis":regain_kpis,
         "second_ball_img":second_ball_img,"second_ball_kpis":second_ball_kpis,
         "transition_img":transition_img,"transition_kpis":transition_kpis,
@@ -797,19 +1016,24 @@ def build_context(impect_match_id: int, dvms_match_id: str | None = None) -> dic
         "recovery_player_img":_bars(recovery_top6.index.tolist(),recovery_top6.values.tolist(),palette.CHARLTON_RED),
         "event_counts":{"pressures":pressure_kpis["pressure_n"],"regains":regain_kpis["n"],"second_balls":second_ball_kpis["n"],"losses":transition_kpis["high_losses_n"]},
         "big_chances":{
-            team:[{"minute":str(r.gameTime).split(':')[0]+"'","player":str(r.playerName).split()[-1],"xg":float(r.SHOT_XG),"result":str(r.category).upper()} for r in metrics.shot_events(events).loc[lambda x:x.squadName==team].nlargest(7,"SHOT_XG").itertuples()]
+            team:[{"minute":str(r.gameTime).split(':')[0]+"'","player":str(r.playerName).split()[-1],"xg":float(r.SHOT_XG),
+                   "result":("OFF TARGET" if str(r.category) == "Other" else str(r.category).upper())}
+                  for r in metrics.shot_events(events).loc[lambda x:x.squadName==team].nlargest(7,"SHOT_XG").itertuples()]
             for team in teams
         },
+        "font_faces_css": _fonts.embedded_css(),
     })
     return context
 
 
-def render_report(impect_match_id: int, dvms_match_id: str | None, output_path: Path) -> Path:
+def render_report(impect_match_id: int, dvms_match_id: str | None, output_path: Path,
+                  chrome_bin: str | Path | None = None) -> Path:
     context=build_context(impect_match_id,dvms_match_id)
     env=Environment(loader=FileSystemLoader(str(TEMPLATES_DIR)),autoescape=select_autoescape(["html"]),trim_blocks=True,lstrip_blocks=True)
     html=env.get_template("expanded.html.j2").render(**context)
     output_path.parent.mkdir(parents=True,exist_ok=True)
-    chrome=Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+    chrome = resolve_chrome(chrome_bin)
+    print(f"Rendering with {chrome_version(chrome)} ({chrome})")
     with tempfile.TemporaryDirectory(prefix="expanded-report-") as tmp:
         html_path=Path(tmp)/"report.html"
         html_path.write_text(html,encoding="utf-8")

@@ -6,6 +6,9 @@ Only what the IMPECT chart module can't draw lives here; everything else
 
 from __future__ import annotations
 
+import base64
+import io
+
 import matplotlib
 
 matplotlib.use("Agg")
@@ -15,7 +18,10 @@ import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
 from src.report import palette  # noqa: E402
-from src.report.chart import _fig_to_uri  # noqa: E402
+from src.report.expanded import _fonts  # noqa: E402
+
+_fonts.register()
+plt.rcParams["font.family"] = _fonts.SANS
 
 
 def territory_chart(wave: pd.DataFrame, goals: list[dict],
@@ -30,6 +36,7 @@ def territory_chart(wave: pd.DataFrame, goals: list[dict],
     the line, opponent below, goals marked on the timeline.
     """
     fig, ax = plt.subplots(figsize=figsize)
+    fig.subplots_adjust(left=0.07, right=0.99, top=0.92, bottom=0.18)
     fig.patch.set_facecolor(palette.PAPER)
     ax.set_facecolor(palette.PAPER)
 
@@ -62,7 +69,7 @@ def territory_chart(wave: pd.DataFrame, goals: list[dict],
                     zorder=7, path_effects=halo)
 
     ax.set_ylim(-peak * 1.9, peak * 1.9)
-    ax.set_xlim(0, max(float(x.max()), 90))
+    ax.set_xlim(0, 95)
     ax.set_xticks([0, 15, 30, 45, 60, 75, 90])
     ax.set_xticklabels(["0'", "15'", "30'", "HT", "60'", "75'", "90'"])
     ax.tick_params(axis="x", labelsize=10.5, colors=palette.MUTED, length=0, pad=6)
@@ -71,7 +78,7 @@ def territory_chart(wave: pd.DataFrame, goals: list[dict],
     ax.set_yticks(ticks)
     ax.set_yticklabels([f"+{t}m" if t > 0 else (f"{t}m" if t else "0")
                         for t in ticks])
-    ax.set_ylabel("Ball territory\n(tracked)", fontsize=9.4, color=palette.MUTED,
+    ax.set_ylabel("Ball territory", fontsize=9.4, color=palette.MUTED,
                   linespacing=1.5)
     ax.tick_params(axis="y", labelsize=9, colors=palette.MUTED)
     ax.grid(axis="y", color=palette.HAIR, linewidth=0.5, alpha=0.6, zorder=0)
@@ -82,10 +89,8 @@ def territory_chart(wave: pd.DataFrame, goals: list[dict],
     for spine in ("left", "bottom"):
         ax.spines[spine].set_color(palette.HAIR)
 
-    for txt, col, y_at, va in (
-        (charlton_team, palette.CHARLTON_RED, peak * 1.82, "top"),
-        (opponent_team, palette.OPPONENT_GREY, -peak * 1.82, "bottom"),
-    ):
-        ax.annotate(txt.upper(), (1.0, y_at), fontsize=8.6, fontweight="bold",
-                    color=col, va=va, ha="left", zorder=5)
-    return _fig_to_uri(fig)
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=200, facecolor=fig.get_facecolor())
+    plt.close(fig)
+    buf.seek(0)
+    return "data:image/png;base64," + base64.b64encode(buf.read()).decode("ascii")

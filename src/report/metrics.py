@@ -473,9 +473,18 @@ def zone_entries(events: pd.DataFrame, team: str) -> pd.DataFrame:
     t = events.loc[
         (events["squadName"] == team) & (events["actionType"].isin(["PASS", "DRIBBLE"]))
     ].copy()
-    entries = t.loc[
-        t["endPitchPosition"].isin(ATTACKING_ZONES) & ~t["startPitchPosition"].isin(ATTACKING_ZONES)
-    ].copy()
+    # Final-third entries must originate from outside both attacking zones, but
+    # box entries commonly build up through the final third first -- requiring
+    # a box entry's start to be outside *both* zones (the final-third rule)
+    # undercounted box entries by 6x on the reference fixture (5 vs the true 33)
+    # by excluding every final-third-to-box pass as "already in an attacking zone".
+    final_third = t.loc[
+        (t["endPitchPosition"] == "FINAL_THIRD") & ~t["startPitchPosition"].isin(ATTACKING_ZONES)
+    ]
+    box = t.loc[
+        (t["endPitchPosition"] == "OPPONENT_BOX") & (t["startPitchPosition"] != "OPPONENT_BOX")
+    ]
+    entries = pd.concat([final_third, box]).copy()
     entries["success"] = entries["result"] == "SUCCESS"
     entries["carry"] = entries["actionType"] == "DRIBBLE"
     entries["threat"] = entries["PXT_ATTACK"].fillna(0.0).clip(lower=0.0)

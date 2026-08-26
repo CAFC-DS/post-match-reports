@@ -18,6 +18,8 @@ def main() -> int:
     parser.add_argument("--impect-match-id", type=int, required=True)
     parser.add_argument("--dvms-match-id", help="optional DVMS/Opta match-id override")
     parser.add_argument("--output-dir", type=Path, default=Path("outputs"))
+    parser.add_argument("--chrome-bin", type=Path,
+                        help="Chrome/Chromium executable (or set CHROME_BIN)")
     parser.add_argument("--yes", action="store_true", help="retained for CLI compatibility")
     args = parser.parse_args()
 
@@ -54,7 +56,12 @@ def main() -> int:
         f"{meta.kickoff:%d-%m-%Y}.pdf"
     )
     final_path = args.output_dir / final_name
-    render_report(args.impect_match_id, fixture.opta_match_id, final_path)
+    render_report(
+        args.impect_match_id,
+        fixture.opta_match_id,
+        final_path,
+        chrome_bin=args.chrome_bin,
+    )
     print(f"Wrote PDF: {final_path}")
     return 0
 
