@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8">
+  <title>{{ meta.home_team }} {{ meta.home_goals }}–{{ meta.away_goals }} {{ meta.away_team }} — Set Play Analysis (DVMS)</title>
+  <style>
+  @import url("https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap");
+
+  :root {
+    --paper: {{ theme.paper }};
+    --surface: {{ theme.surface }};
+    --ink: {{ theme.ink }};
+    --muted: {{ theme.muted }};
+    --faint: {{ theme.faint }};
+    --grid: {{ theme.grid }};
+    --hair: {{ theme.hair }};
+    --chip: {{ theme.chip }};
+    --red: {{ theme.red }};
+    --red-dark: {{ theme.red_dark }};
+    --green: {{ theme.green }};
+    --home: {{ home_bar }};
+    --away: {{ away_bar }};
+    --goal: {{ legends.goal }};
+    --font: "Plus Jakarta Sans", "Helvetica Neue", Arial, sans-serif;
+  }
+
+  @page { size: A4 landscape; margin: 0; background: var(--paper); }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; background: var(--paper); color: var(--ink);
+    font-family: var(--font);
+    font-feature-settings: "ss01" 1, "tnum" 1, "lnum" 1;
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
+  }
+  .page { width: 100%; height: 210mm; padding: 6mm 11mm 4mm 11mm; background: var(--paper); page-break-after: always; overflow: hidden; }
+  .page.last { page-break-after: avoid; }
+
+  .masthead {
+    display: grid; grid-template-columns: 1fr auto 1fr; align-items: center;
+    column-gap: 6mm; padding-bottom: 2.5mm; border-bottom: 2px solid var(--red);
+    margin-bottom: 3.5mm;
+  }
+  .masthead .title {
+    font-size: 13pt; font-weight: 800; letter-spacing: 0.14em;
+    text-transform: uppercase; color: var(--ink); white-space: nowrap;
+  }
+  .masthead .title.right {
+    text-align: right; color: var(--muted); font-weight: 700;
+    font-size: 10.5pt; letter-spacing: 0.12em;
+  }
+  .scoreline { display: flex; align-items: center; justify-content: center; gap: 4mm; white-space: nowrap; }
+  .scoreline .team { font-size: 12pt; font-weight: 700; color: var(--ink); white-space: nowrap; }
+  .scoreline img { height: 11mm; width: auto; object-fit: contain; }
+  .scoreline .score {
+    font-size: 21pt; font-weight: 800; letter-spacing: 0.03em;
+    padding: 0 2mm; color: var(--ink); font-variant-numeric: tabular-nums;
+  }
+  .sub {
+    display: block; text-align: center; font-size: 7pt; color: var(--faint);
+    letter-spacing: 0.14em; text-transform: uppercase; margin-top: 1.5mm; font-weight: 600;
+  }
+  .sub b { color: var(--muted); font-weight: 800; }
+
+  .main { display: grid; grid-template-columns: 1fr 1.32fr 1fr; column-gap: 8mm; align-items: start; }
+
+  .panel-head {
+    font-size: 8pt; font-weight: 800; text-transform: uppercase; letter-spacing: 0.12em;
+    color: var(--ink); padding-bottom: 1.2mm; margin: 0 0 1.8mm 0;
+    border-bottom: 1px solid var(--grid); text-align: center;
+  }
+  .pitch-wrap { text-align: center; }
+  .pitch-wrap.corner img { height: 32mm; width: auto; max-width: 100%; }
+  .pitch-wrap.sm img { height: 45mm; width: auto; max-width: 100%; }
+  .pitch-wrap.ff img { height: 88mm; width: auto; max-width: 100%; }
+
+  .dual { display: grid; grid-template-columns: 1fr 1fr; column-gap: 3mm; margin-top: 2.6mm; }
+
+  .leg { margin-top: 1.6mm; }
+  .lrow { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 0.7mm 2.2mm; margin-bottom: 0.6mm; }
+  .lrow:last-child { margin-bottom: 0; }
+  .lrow .lb { font-size: 6pt; font-weight: 800; text-transform: uppercase; letter-spacing: 0.09em; color: var(--faint); }
+  .lrow .it { display: inline-flex; align-items: center; gap: 1.2mm; font-size: 6.6pt; font-weight: 600; color: var(--muted); white-space: nowrap; }
+  .lrow .d { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex: none; }
+  .lrow .r { width: 9px; height: 9px; border-radius: 50%; background: var(--paper); display: inline-block; flex: none; box-sizing: border-box; }
+  .lrow .st { color: var(--goal); font-size: 9.5pt; line-height: 1; -webkit-text-stroke: 0.4px var(--ink); }
+  .lrow .sepd { width: 1px; height: 8px; background: var(--grid); display: inline-block; margin: 0 0.4mm; }
+
+  .side-table { margin-top: 2mm; }
+  table.fc { width: 100%; border-collapse: collapse; font-size: 7.6pt; }
+  table.fc th, table.fc td { padding: 0.6mm 0.6mm; text-align: center; line-height: 1.1; }
+  table.fc thead tr.cols th {
+    font-size: 6.2pt; text-transform: uppercase; letter-spacing: 0.04em; color: var(--faint);
+    border-bottom: 1.4px solid var(--grid); font-weight: 700; padding-bottom: 1mm;
+  }
+  table.fc tbody tr + tr td { border-top: 1px solid var(--hair); }
+  table.fc .team-cell { text-align: left; font-weight: 700; white-space: nowrap; font-size: 6.4pt; }
+  table.fc td.win { font-weight: 800; color: var(--ink); }
+
+  .stats { padding: 0 1mm; }
+  .stat-section {
+    font-size: 7.4pt; font-weight: 800; text-transform: uppercase; letter-spacing: 0.14em;
+    color: var(--red-dark); background: var(--chip); text-align: center;
+    padding: 1.5mm 0 1.3mm 0; margin: 0;
+  }
+  .bar-row { padding: 1.05mm 0 1.05mm 0; border-bottom: 1px solid var(--hair); }
+  .bar-label {
+    font-size: 6.2pt; font-weight: 700; text-align: center; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.3mm; line-height: 1;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .bar-track { display: flex; height: 4.1mm; border-radius: 2.3mm; overflow: hidden; background: var(--hair); }
+  .bar-track .seg { display: flex; align-items: center; font-size: 7.4pt; font-weight: 800; min-width: 5mm; }
+  .bar-track .seg.home { justify-content: flex-start; padding-left: 2.4mm; background: var(--home); border-radius: 2.3mm 0 0 2.3mm; }
+  .bar-track .seg.away { justify-content: flex-end; padding-right: 2.4mm; background: var(--away); border-radius: 0 2.3mm 2.3mm 0; }
+  .bar-track .seg.zero { color: var(--faint); background: var(--hair); }
+
+  .ff-grid { display: grid; grid-template-columns: 1fr 1fr; column-gap: 14mm; margin-top: 2mm; }
+  .ff-meta { text-align: center; font-size: 7.6pt; color: var(--muted); margin-top: 1.6mm; }
+  .ff-meta b { color: var(--ink); font-weight: 800; }
+  .ff-meta .goal-tag { color: var(--goal); font-weight: 800; }
+
+  .footnote {
+    margin-top: 2.4mm; font-size: 6.2pt; color: var(--faint);
+    line-height: 1.4; text-align: center;
+  }
+  .footnote b { color: var(--muted); font-weight: 800; }
+  </style>
+</head>
+<body>
+{% macro outcome_row(label, items) %}
+<div class="lrow">
+  <span class="lb">{{ label }}</span>
+  {% for name, colour in items %}<span class="it"><span class="r" style="border: 2.2px solid {{ colour }}"></span>{{ name }}</span>{% endfor %}
+  <span class="it"><span class="st">&#9733;</span>goal</span>
+</div>
+{% endmacro %}
+{% macro type_row(label, items) %}
+<div class="lrow">
+  <span class="lb">{{ label }}</span>
+  {% for name, colour in items %}<span class="it"><span class="d" style="background: {{ colour }}"></span>{{ name }}</span>{% endfor %}
+</div>
+{% endmacro %}
+{% macro team_panel(p, side) %}
+<section class="team-col">
+  <div class="panel-head">Attacking Corners</div>
+  <div class="pitch-wrap corner"><img src="{{ p.corner_img }}" alt=""></div>
+  <div class="leg">
+    {{ type_row('Landed', legends.corner_types) }}
+    {{ outcome_row('1st contact', legends.contact) }}
+  </div>
+  <div class="dual">
+    <div>
+      <div class="panel-head">Free Kicks</div>
+      <div class="pitch-wrap sm"><img src="{{ p.fk_img }}" alt=""></div>
+    </div>
+    <div>
+      <div class="panel-head">Throw-Ins</div>
+      <div class="pitch-wrap sm"><img src="{{ p.throw_img }}" alt=""></div>
+    </div>
+  </div>
+  <div class="leg">
+    {{ type_row('Free kicks', legends.fk_types) }}
+    <div class="lrow">
+      <span class="lb">Throw-ins</span>
+      {% for name, colour in legends.throw_types %}<span class="it"><span class="d" style="background: {{ colour }}"></span>{{ name }}</span>{% endfor %}
+      <span class="sepd"></span>
+      {% for name, colour in legends.throw_outcome %}<span class="it"><span class="r" style="border: 2.2px solid {{ colour }}"></span>{{ name }}</span>{% endfor %}
+    </div>
+  </div>
+  <div class="side-table">
+    <div class="panel-head">First Contacts</div>
+    <table class="fc">
+      <thead>
+        <tr class="cols"><th class="team-cell">Set piece</th><th>N</th><th>Won</th><th>Lost</th><th>Win%</th></tr>
+      </thead>
+      <tbody>
+        {% for r in p.contact_rows %}
+        <tr>
+          <td class="team-cell">{{ r.label }}</td>
+          <td>{{ r.c.n }}</td><td>{{ r.c.won }}</td><td>{{ r.c.lost }}</td><td class="win">{{ r.c.win_rate }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endmacro %}
+
+<div class="page">
+  <div class="masthead">
+    <div class="title">Set Play Analysis</div>
+    <div class="scorebox">
+      <div class="scoreline">
+        <span class="team">{{ meta.home_team }}</span>
+        {% if meta.home_badge %}<img src="{{ meta.home_badge }}" alt="">{% endif %}
+        <span class="score">{{ meta.home_goals }}&nbsp;–&nbsp;{{ meta.away_goals }}</span>
+        {% if meta.away_badge %}<img src="{{ meta.away_badge }}" alt="">{% endif %}
+        <span class="team">{{ meta.away_team }}</span>
+      </div>
+      <span class="sub"><b>Opta + Second Spectrum (DVMS)</b> &nbsp;·&nbsp; {{ meta.date }}</span>
+    </div>
+    <div class="title right">{{ meta.competition }}</div>
+  </div>
+
+  <div class="main">
+    {{ team_panel(panels.home, 'home') }}
+
+    <section class="stats">
+      {% for row in stat_rows %}
+        {% if row.section %}<div class="stat-section">{{ row.section }}</div>{% endif %}
+        <div class="bar-row">
+          <div class="bar-label">{{ row.label }}</div>
+          <div class="bar-track">
+            <div class="seg home {{ 'zero' if row.home_value == '0' }}" style="width: {{ row.home_width }}%{% if row.home_value != '0' %}; color: {{ home_text }}{% endif %}">{{ row.home_value }}</div>
+            <div class="seg away {{ 'zero' if row.away_value == '0' }}" style="width: {{ row.away_width }}%{% if row.away_value != '0' %}; color: {{ away_text }}{% endif %}">{{ row.away_value }}</div>
+          </div>
+        </div>
+      {% endfor %}
+    </section>
+
+    {{ team_panel(panels.away, 'away') }}
+  </div>
+
+  <div class="footnote">
+    Marker fill = delivery type; outline = first contact (the next on-ball event within 5s of the delivery — a derivation from the Opta feed, not an analyst tag). ★ = goal within 10s.
+    Corner types are geometric (where the delivery arrived; box thirds relative to the taking corner). "Shots created" = shots inside 10s of a delivery · xG: CAFC-lite, a deterministic in-house model · data: Opta F24/F7 via DVMS.
+  </div>
+</div>
+
+<div class="page last">
+  <div class="masthead">
+    <div class="title">Corner Freeze-Frames</div>
+    <div class="scorebox">
+      <div class="scoreline">
+        <span class="team">{{ meta.home_team }}</span>
+        <span class="score">{{ meta.home_goals }}&nbsp;–&nbsp;{{ meta.away_goals }}</span>
+        <span class="team">{{ meta.away_team }}</span>
+      </div>
+      <span class="sub"><b>Second Spectrum tracking</b> &nbsp;·&nbsp; all 22 players at the moment of delivery</span>
+    </div>
+    <div class="title right">{{ meta.competition }}</div>
+  </div>
+
+  <div class="ff-grid">
+    {% for side in ('home', 'away') %}
+    {% if freeze.get(side) %}
+    {% set f = freeze[side] %}
+    <div>
+      <div class="panel-head">{{ f.team }} — most dangerous corner</div>
+      <div class="pitch-wrap ff"><img src="{{ f.img }}" alt=""></div>
+      <div class="ff-meta">
+        <b>{{ f.minute }}'</b> · {{ f.taker }} from the {{ f.side_taken }}
+        {% if f.goal %} · <span class="goal-tag">&#9733; GOAL</span>{% endif %}
+        · defending line dropped <b>{{ f.line_drop }}</b> in the 5s before delivery
+      </div>
+    </div>
+    {% endif %}
+    {% endfor %}
+  </div>
+
+  <div class="footnote">
+    Freeze-frame = the tracking frame at the strike of the chosen corner (a goal if one came from a corner, else the delivery whose 10-second window carried the most CAFC-lite xG).
+    Filled = attacking team (shirt numbers), hollow = defenders, black dot = ball. Line drop = change in the defending back line's median height, metres (positive = retreated).
+  </div>
+</div>
+
+</body>
+</html>

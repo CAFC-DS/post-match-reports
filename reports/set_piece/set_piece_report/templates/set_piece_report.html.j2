@@ -1,0 +1,459 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8">
+  <title>{{ meta.home_team }} {{ meta.score }} {{ meta.away_team }} — Set Play Report</title>
+  <style>
+  @import url("https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap");
+
+  :root {
+    --paper: {{ theme.paper }};
+    --surface: {{ theme.surface }};
+    --ink: {{ theme.ink }};
+    --muted: {{ theme.muted }};
+    --faint: {{ theme.faint }};
+    --grid: {{ theme.grid }};
+    --hair: {{ theme.hair }};
+    --chip: {{ theme.chip }};
+    --red: {{ theme.red }};
+    --red-dark: {{ theme.red_dark }};
+    --green: {{ theme.green }};
+    --home: {{ home_bar }};
+    --away: {{ away_bar }};
+    --goal: {{ legends.goal }};
+    --section-bg: {{ '#E1E3E5' if theme_name == 'light' else '#2D3239' }};
+    --zero-bg: {{ '#D8D6D0' if theme_name == 'light' else '#343941' }};
+    --font: "Plus Jakarta Sans", "Helvetica Neue", Arial, sans-serif;
+  }
+
+  @page { size: A4 landscape; margin: 0; background: var(--paper); }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; background: var(--paper); color: var(--ink);
+    font-family: var(--font);
+    font-feature-settings: "ss01" 1, "tnum" 1, "lnum" 1;
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
+  }
+  .page { width: 100%; padding: 7mm 12mm 4mm 12mm; background: var(--paper); }
+  .page.appendix { page-break-before: always; }
+
+  /* ---------------------------------------------------------- masthead --- */
+  .masthead {
+    display: grid; grid-template-columns: 1fr auto 1fr; align-items: center;
+    column-gap: 6mm; padding-bottom: 2.4mm; border-bottom: 2px solid var(--red);
+    margin-bottom: 3mm;
+  }
+  .masthead .title {
+    font-size: 11pt; font-weight: 800; letter-spacing: 0.11em;
+    text-transform: uppercase; color: var(--ink); white-space: nowrap;
+  }
+  .masthead .title.right {
+    text-align: right; color: var(--muted); font-weight: 800;
+    font-size: 8pt; letter-spacing: 0.11em;
+  }
+  .meta-right { text-align: right; align-self: center; }
+  .meta-right .sub {
+    text-align: right; margin-top: 1.2mm; font-size: 6.5pt;
+    letter-spacing: 0.08em; white-space: nowrap;
+  }
+  .scoreline { display: flex; align-items: center; justify-content: center; gap: 4mm; white-space: nowrap; }
+  .scoreline .team { font-size: 12pt; font-weight: 700; color: var(--ink); white-space: nowrap; }
+  .scoreline .team.home { text-align: right; }
+  .scoreline .team.away { text-align: left; }
+  .badge-img {
+    display: block; width: 9.5mm; height: 9.5mm; object-fit: contain;
+    flex: 0 0 9.5mm; align-self: center;
+  }
+  .scoreline .score {
+    font-size: 21pt; font-weight: 800; letter-spacing: 0.03em;
+    padding: 0 2mm; color: var(--ink); font-variant-numeric: tabular-nums;
+  }
+  .sub {
+    display: block; text-align: center; font-size: 7pt; color: var(--faint);
+    letter-spacing: 0.14em; text-transform: uppercase; margin-top: 1.5mm; font-weight: 600;
+  }
+  .sub b { color: var(--muted); font-weight: 800; }
+
+  /* -------------------------------------------------------------- main --- */
+  .main { display: grid; grid-template-columns: 1fr 1.32fr 1fr; column-gap: 9mm; align-items: start; }
+
+  .panel-head {
+    font-size: 8pt; font-weight: 800; text-transform: uppercase; letter-spacing: 0.12em;
+    color: var(--ink); padding-bottom: 1.2mm; margin: 0 0 1.8mm 0;
+    border-bottom: 1px solid var(--grid); text-align: center;
+  }
+  .pitch-wrap { text-align: center; }
+  .pitch-wrap.corner img { height: 33mm; width: auto; max-width: 100%; }
+  .pitch-wrap.sm img { height: 44mm; width: auto; max-width: 100%; }
+
+  .dual { display: grid; grid-template-columns: 1fr 1fr; column-gap: 3.4mm; margin-top: 2.8mm; }
+
+  /* ----------------------------------------------------------- legends --- */
+  /* One shared visual language for every legend on the page: a label
+     followed by its keys, all sharing the same marker system (.mk). */
+  .leg { margin-top: 2.2mm; }
+  .lrow { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 0.9mm 2.6mm; margin-bottom: 1.8mm; }
+  .lrow:last-child { margin-bottom: 0; }
+  .lrow .lb { font-size: 6pt; font-weight: 800; text-transform: uppercase; letter-spacing: 0.09em; color: var(--faint); }
+  .lrow .it { display: inline-flex; align-items: center; gap: 1.4mm; font-size: 6.6pt; font-weight: 600; color: var(--muted); white-space: nowrap; line-height: 1; }
+  .mk { display: inline-block; flex: none; }
+  .mk.dot { width: 7px; height: 7px; border-radius: 50%; }
+  .mk.ring { width: 8px; height: 8px; border-radius: 50%; background: var(--paper); border: 2.2px solid; box-sizing: border-box; }
+  .mk.star {
+    width: 9px; height: 9px; line-height: 9px; text-align: center; font-size: 7.5pt;
+    color: var(--goal); -webkit-text-stroke: 0.4px var(--ink);
+  }
+  .lrow .sepd { width: 1px; height: 8px; background: var(--grid); display: inline-block; margin: 0 0.4mm; }
+
+  /* Per-team first-contact table, tucked under that side's maps (team-mode only). */
+  .side-table { margin-top: 1.8mm; }
+  table.fc.side { font-size: 6.6pt; width: 100%; }
+  table.fc.side th, table.fc.side td { padding: 0.7mm 0.6mm; line-height: 1.1; text-align: center; }
+  table.fc.side .team-cell { font-size: 6.4pt; }
+
+  /* ------------------------------------------------------- stat column --- */
+  .stats { padding: 0 1mm; }
+  .stat-head {
+    display: grid; grid-template-columns: 9mm 9mm 1fr 9mm 9mm; align-items: center;
+    font-size: 6.2pt; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--faint); padding-bottom: 1.2mm; border-bottom: 1.4px solid var(--grid);
+    margin-bottom: 0.3mm;
+  }
+  .stat-head .c { text-align: center; }
+  .stat-section {
+    display: flex; align-items: baseline; justify-content: space-between;
+    font-size: 7.4pt; font-weight: 800; text-transform: uppercase; letter-spacing: 0.13em;
+    color: var(--ink); background: var(--section-bg); text-align: center;
+    padding: 1.4mm 3mm 1.3mm 3mm; margin: 1.8mm 0 1mm 0; border-radius: 1mm;
+  }
+  .stats .stat-section:first-child { margin-top: 0; }
+  .stat-section .sname { flex: 1; }
+  .stat-section .scount {
+    font-size: 6.4pt; font-weight: 700; letter-spacing: 0.02em; text-transform: none;
+    color: var(--muted); white-space: nowrap;
+  }
+  .stat-section .scount.home { text-align: left; }
+  .stat-section .scount.away { text-align: right; }
+  .bar-row {
+    display: grid; grid-template-columns: 9mm 9mm 1fr 9mm 9mm; align-items: center;
+    column-gap: 1.8mm; padding: 0.9mm 0 0.9mm 0; border-bottom: 1px solid var(--hair);
+  }
+  .bar-row .pct { font-size: 6.8pt; text-align: center; font-weight: 700; line-height: 1.05; }
+  .bar-row .per90 { font-size: 7.4pt; text-align: center; color: var(--muted); font-weight: 600; line-height: 1.05; }
+  .pct.up { color: var(--green); }
+  .pct.down { color: var(--red); }
+  .pct.muted { color: var(--faint); }
+  .bar { min-width: 0; }
+  .bar-label {
+    font-size: 6.6pt; font-weight: 700; text-align: center; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.4mm; line-height: 1;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .bar-track { display: flex; height: 4.6mm; border-radius: 2.3mm; overflow: hidden; background: var(--hair); }
+  .bar-track .seg { display: flex; align-items: center; gap: 1mm; font-size: 8pt; font-weight: 800; min-width: 6mm; }
+  .bar-track .seg.home { justify-content: flex-start; padding-left: 2.8mm; background: var(--home); border-radius: 2.3mm 0 0 2.3mm; }
+  .bar-track .seg.away { justify-content: flex-end; padding-right: 2.8mm; background: var(--away); border-radius: 0 2.3mm 2.3mm 0; }
+  .bar-track .seg.zero { color: var(--faint); background: var(--zero-bg); }
+  .bar-track .seg .gstar { font-size: 7pt; font-weight: 700; opacity: 0.92; }
+
+  /* Matchday-1: no season baseline to compare against, so per90/%chg columns
+     collapse and the bar takes the full row width instead of showing dashes. */
+  .stats.compact .stat-head { display: none; }
+  .stats.compact .bar-row { grid-template-columns: 1fr; padding: 0.6mm 0; }
+  .stats.compact .pct, .stats.compact .per90 { display: none; }
+  .stats.compact .stat-section { margin: 1.1mm 0 0.6mm; padding: 1mm 3mm; }
+  .stats.compact .bar-label { font-size: 6.1pt; margin-bottom: 0.25mm; }
+  .stats.compact .bar-track { height: 3.8mm; }
+
+  /* ----------------------------------------------------------- footnote --- */
+  .footnote {
+    margin-top: 2mm; font-size: 6.2pt; color: var(--faint);
+    line-height: 1.35; text-align: center;
+  }
+  .footnote b { color: var(--muted); font-weight: 800; }
+
+  /* ---------------------------------------------------------- appendix --- */
+  .apx-head {
+    display: flex; align-items: baseline; justify-content: space-between;
+    padding-bottom: 3mm; margin-bottom: 6mm; border-bottom: 2px solid var(--red);
+  }
+  .apx-head .apx-title {
+    font-size: 13pt; font-weight: 800; letter-spacing: 0.14em; text-transform: uppercase;
+  }
+  .apx-head .apx-sub {
+    font-size: 8.5pt; color: var(--muted); font-weight: 600; letter-spacing: 0.02em;
+  }
+  .apx-head .apx-sub b { color: var(--ink); font-weight: 800; }
+  .apx-note {
+    font-size: 7.6pt; color: var(--faint); text-align: center; margin-bottom: 7mm; line-height: 1.5;
+  }
+  .apx-tables { display: grid; grid-template-columns: 1fr 1fr; column-gap: 16mm; }
+  .apx-col { max-width: 130mm; margin: 0 auto; width: 100%; }
+  .apx-col .apx-team {
+    font-size: 11pt; font-weight: 800; text-align: center; letter-spacing: 0.04em;
+    padding-bottom: 2.4mm; margin-bottom: 4mm; border-bottom: 2px solid var(--team);
+  }
+  .apx-col.home .apx-team { --team: var(--home); color: var(--home); }
+  .apx-col.away .apx-team { --team: var(--away); color: var(--away); }
+  table.fc.full { width: 100%; border-collapse: collapse; font-size: 9pt; }
+  table.fc.full th, table.fc.full td { padding: 2.6mm 2mm; text-align: center; line-height: 1.2; }
+  table.fc.full thead tr.group th {
+    font-size: 7.4pt; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted);
+    font-weight: 800; padding-bottom: 1.2mm;
+  }
+  table.fc.full thead tr.cols th {
+    font-size: 7.4pt; text-transform: uppercase; letter-spacing: 0.04em; color: var(--faint);
+    border-bottom: 1.4px solid var(--grid); font-weight: 700; padding-bottom: 2mm;
+  }
+  table.fc.full tbody tr:nth-child(even) { background: var(--chip); }
+  table.fc.full tbody tr + tr td { border-top: 1px solid var(--hair); }
+  table.fc.full .team-cell { text-align: left; font-weight: 700; white-space: nowrap; padding-left: 3mm; }
+  table.fc.full td.win, table.fc.full td.tot { font-weight: 800; color: var(--ink); }
+  table.fc.full .divider { border-left: 1px solid var(--grid); }
+  table.fc.full td.dim { color: var(--faint); }
+
+  /* Player winners sit beneath the free-kick / throw-in maps in the one-page
+     players variant. Keep this deliberately compact so the report remains a
+     single landscape page while retaining the same columns as the appendix. */
+  .inline-players { margin-top: 1.8mm; }
+  .inline-players .panel-head { margin-bottom: 0.8mm; }
+  table.fc.inline { width: 100%; border-collapse: collapse; font-size: 6.2pt; }
+  table.fc.inline th, table.fc.inline td { padding: 0.75mm 0.45mm; text-align: center; line-height: 1.08; border: 0.6px solid #111; }
+  table.fc.inline thead tr.group th { font-size: 5.9pt; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 800; padding-bottom: 0.4mm; }
+  table.fc.inline thead tr.cols th { font-size: 5.7pt; text-transform: uppercase; letter-spacing: 0.03em; color: var(--ink); border-bottom: 0.6px solid #111; font-weight: 700; padding-bottom: 0.7mm; }
+  table.fc.inline tbody tr:nth-child(even) { background: var(--chip); }
+  table.fc.inline tbody tr + tr td { border-top: 0.6px solid #111; }
+  table.fc.inline .team-cell { text-align: left; font-weight: 700; white-space: nowrap; padding-left: 0.8mm; max-width: 23mm; overflow: hidden; text-overflow: ellipsis; }
+  table.fc.inline td.tot { font-weight: 800; color: var(--ink); }
+  table.fc.inline .divider { border-left: 0.6px solid #111; }
+  table.fc.inline tr.cols th:nth-child(3), table.fc.inline tr.cols th:nth-child(5),
+  table.fc.inline tbody td:nth-child(3), table.fc.inline tbody td:nth-child(5) { border-left: 1px solid #111; }
+  table.fc.inline td.dim { color: var(--faint); }
+
+  /* --------------------------------------------------- legacy tables --- */
+  .tables { display: grid; grid-template-columns: 1fr 1fr; column-gap: 12mm; margin-top: 3.2mm; padding-top: 3.2mm; border-top: 2px solid var(--red); }
+  .tables .block { max-width: 100mm; margin: 0 auto; width: 100%; }
+  .tables h4 {
+    font-size: 8.5pt; font-weight: 800; text-transform: uppercase; letter-spacing: 0.1em;
+    margin: 0 0 1.8mm 0; color: var(--ink); text-align: center;
+  }
+  table.fc { width: 100%; border-collapse: collapse; font-size: 7.6pt; }
+  table.fc th, table.fc td { padding: 1.05mm 1mm; text-align: center; line-height: 1.1; }
+  table.fc thead tr.group th {
+    font-size: 6.6pt; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted);
+    font-weight: 800; padding-bottom: 0.6mm;
+  }
+  table.fc thead tr.cols th {
+    font-size: 6.2pt; text-transform: uppercase; letter-spacing: 0.04em; color: var(--faint);
+    border-bottom: 1.4px solid var(--grid); font-weight: 700; padding-bottom: 1mm;
+  }
+  table.fc tbody tr + tr td { border-top: 1px solid var(--hair); }
+  table.fc .team-cell { text-align: left; font-weight: 700; white-space: nowrap; }
+  table.fc .home-row .team-cell { color: var(--home); }
+  table.fc .away-row .team-cell { color: var(--away); }
+  table.fc td.win, table.fc td.tot { font-weight: 800; color: var(--ink); }
+  table.fc .divider { border-left: 1px solid var(--grid); }
+  table.fc td.dim { color: var(--faint); }
+  </style>
+</head>
+<body>
+{% macro legend_row(label, items, shape='dot') %}
+<div class="lrow">
+  <span class="lb">{{ label }}</span>
+  {% for name, colour in items %}
+  <span class="it">
+    {% if shape == 'ring' %}<span class="mk ring" style="border-color: {{ colour }}"></span>
+    {% else %}<span class="mk dot" style="background: {{ colour }}"></span>{% endif %}
+    {{ name }}
+  </span>
+  {% endfor %}
+</div>
+{% endmacro %}
+{% macro legend_star() %}<span class="it"><span class="mk star">&#9733;</span>goal</span>{% endmacro %}
+{% macro corner_legend() %}
+<div class="leg">
+  {{ legend_row('Landed', legends.corner_types, 'dot') }}
+  <div class="lrow">
+    <span class="lb">1st contact</span>
+    {% for name, colour in legends.contact %}<span class="it"><span class="mk ring" style="border-color: {{ colour }}"></span>{{ name }}</span>{% endfor %}
+    {{ legend_star() }}
+  </div>
+</div>
+{% endmacro %}
+{% macro dual_legend() %}
+<div class="leg">
+  {{ legend_row('Free kicks', legends.fk_types, 'dot') }}
+  <div class="lrow">
+    <span class="lb">Throw-ins</span>
+    {% for name, colour in legends.throw_types %}<span class="it"><span class="mk dot" style="background: {{ colour }}"></span>{{ name }}</span>{% endfor %}
+    <span class="sepd"></span>
+    {% for name, colour in legends.throw_outcome %}<span class="it"><span class="mk ring" style="border-color: {{ colour }}"></span>{{ name }}</span>{% endfor %}
+    {{ legend_star() }}
+  </div>
+</div>
+{% endmacro %}
+{% macro pitch(img, cls) %}
+<div class="pitch-wrap {{ cls }}"><img src="{{ img }}" alt=""></div>
+{% endmacro %}
+{% macro side_table(side) %}
+  <div class="side-table">
+    <div class="panel-head">First Contacts</div>
+    <table class="fc side">
+      <thead>
+        <tr class="cols"><th class="team-cell">Set piece</th><th>N</th><th>Won</th><th>Lost</th><th>Win%</th></tr>
+      </thead>
+      <tbody>
+        {% for r in side_tables[side].rows %}
+        <tr>
+          <td class="team-cell">{{ r.label }}</td>
+          <td>{{ r.c.n }}</td><td>{{ r.c.won }}</td><td>{{ r.c.lost }}</td><td class="win">{{ r.c.win_rate }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% endmacro %}
+{% macro appendix_table(side) %}
+<table class="fc full">
+  <thead>
+    <tr class="group"><th></th><th colspan="2">Corners</th><th colspan="2" class="divider">Free-kicks</th><th class="divider"></th></tr>
+    <tr class="cols"><th class="team-cell">Player</th><th>Att</th><th>Def</th><th class="divider">Att</th><th>Def</th><th class="divider">Total</th></tr>
+  </thead>
+  <tbody>
+    {% for r in player_tables[side].rows %}
+    <tr>
+      <td class="team-cell">{{ r.player }}</td>
+      <td class="{{ 'dim' if r.corner_att == '·' }}">{{ r.corner_att }}</td>
+      <td class="{{ 'dim' if r.corner_def == '·' }}">{{ r.corner_def }}</td>
+      <td class="divider {{ 'dim' if r.fk_att == '·' }}">{{ r.fk_att }}</td>
+      <td class="{{ 'dim' if r.fk_def == '·' }}">{{ r.fk_def }}</td>
+      <td class="divider tot">{{ r.total }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endmacro %}
+{% macro inline_player_table(side) %}
+<div class="inline-players">
+  <div class="panel-head">First-contact winners</div>
+  <table class="fc inline">
+    <thead>
+      <tr class="group"><th></th><th colspan="2">Corners</th><th colspan="2" class="divider">Free-kicks</th><th class="divider"></th></tr>
+      <tr class="cols"><th class="team-cell">Player</th><th>Att</th><th>Def</th><th class="divider">Att</th><th>Def</th><th class="divider">Total</th></tr>
+    </thead>
+    <tbody>
+      {% for r in player_tables[side].rows %}
+      <tr>
+        <td class="team-cell">{{ r.player }}</td>
+        <td class="{{ 'dim' if r.corner_att == '·' }}">{{ r.corner_att }}</td>
+        <td class="{{ 'dim' if r.corner_def == '·' }}">{{ r.corner_def }}</td>
+        <td class="divider {{ 'dim' if r.fk_att == '·' }}">{{ r.fk_att }}</td>
+        <td class="{{ 'dim' if r.fk_def == '·' }}">{{ r.fk_def }}</td>
+        <td class="divider tot">{{ r.total }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endmacro %}
+<div class="page">
+
+  <!-- ================================================== masthead ===== -->
+  <div class="masthead">
+    <div class="title">Set Play Report</div>
+    <div class="scorebox">
+      <div class="scoreline">
+        <span class="team home">{{ meta.home_team }}</span>
+        {% if meta.home_badge %}<img class="badge-img" src="{{ meta.home_badge }}" alt="{{ meta.home_team }} badge">{% endif %}
+        <span class="score">{{ meta.home_goals }}&nbsp;–&nbsp;{{ meta.away_goals }}</span>
+        {% if meta.away_badge %}<img class="badge-img" src="{{ meta.away_badge }}" alt="{{ meta.away_team }} badge">{% endif %}
+        <span class="team away">{{ meta.away_team }}</span>
+      </div>
+    </div>
+    <div class="meta-right">
+      <div class="title right">{{ meta.competition }}</div>
+      <span class="sub">{% if meta.matchday %}<b>{{ meta.matchday }}</b> &nbsp;·&nbsp; {% endif %}{{ meta.date }}</span>
+    </div>
+  </div>
+
+  <!-- ===================================================== main ====== -->
+  <div class="main">
+
+    <!-- LEFT TEAM PANEL -->
+    {% set p = panels.home %}{% set side = 'home' %}
+    <section class="team-col">
+      <div class="panel-head">Attacking Corners</div>
+      {{ pitch(p.corner_img, 'corner') }}
+      {{ corner_legend() }}
+      <div class="dual">
+        <div>
+          <div class="panel-head">Free Kicks</div>
+          {{ pitch(p.fk_img, 'sm') }}
+        </div>
+        <div>
+          <div class="panel-head">Throw-Ins</div>
+          {{ pitch(p.throw_img, 'sm') }}
+        </div>
+      </div>
+      {{ dual_legend() }}
+      {% if players_mode %}{{ inline_player_table(side) }}{% else %}{{ side_table(side) }}{% endif %}
+    </section>
+
+    <!-- CENTER STAT COLUMN -->
+    <section class="stats {{ 'compact' if stats_compact }}">
+      <div class="stat-head">
+        <div class="c">% chg</div><div class="c">/90</div><div class="c"></div><div class="c">/90</div><div class="c">% chg</div>
+      </div>
+      {% for g in stat_groups %}
+        <div class="stat-section">
+          <span class="scount home">{{ g.home_count }}</span>
+          <span class="sname">{{ g.section }}</span>
+          <span class="scount away">{{ g.away_count }}</span>
+        </div>
+        {% for row in g.rows %}
+        <div class="bar-row">
+          <div class="pct {{ row.home_pct.color }}">{{ row.home_pct.text }}</div>
+          <div class="per90">{{ row.home_per90 }}</div>
+          <div class="bar">
+            <div class="bar-label">{{ row.label }}</div>
+            <div class="bar-track">
+              <div class="seg home {{ 'zero' if row.home_value == '0' }}" style="width: {{ row.home_width }}%{% if row.home_value != '0' %}; color: {{ home_text }}{% endif %}">
+                <span>{{ row.home_value }}</span>{% if row.home_goals %}<span class="gstar">&#9733;{{ row.home_goals }}</span>{% endif %}
+              </div>
+              <div class="seg away {{ 'zero' if row.away_value == '0' }}" style="width: {{ row.away_width }}%{% if row.away_value != '0' %}; color: {{ away_text }}{% endif %}">
+                {% if row.away_goals %}<span class="gstar">&#9733;{{ row.away_goals }}</span>{% endif %}<span>{{ row.away_value }}</span>
+              </div>
+            </div>
+          </div>
+          <div class="per90">{{ row.away_per90 }}</div>
+          <div class="pct {{ row.away_pct.color }}">{{ row.away_pct.text }}</div>
+        </div>
+        {% endfor %}
+      {% endfor %}
+    </section>
+
+    <!-- RIGHT TEAM PANEL -->
+    {% set p = panels.away %}{% set side = 'away' %}
+    <section class="team-col">
+      <div class="panel-head">Attacking Corners</div>
+      {{ pitch(p.corner_img, 'corner') }}
+      {{ corner_legend() }}
+      <div class="dual">
+        <div>
+          <div class="panel-head">Free Kicks</div>
+          {{ pitch(p.fk_img, 'sm') }}
+        </div>
+        <div>
+          <div class="panel-head">Throw-Ins</div>
+          {{ pitch(p.throw_img, 'sm') }}
+        </div>
+      </div>
+      {{ dual_legend() }}
+      {% if players_mode %}{{ inline_player_table(side) }}{% else %}{{ side_table(side) }}{% endif %}
+    </section>
+  </div>
+
+</div>
+
+</body>
+</html>
