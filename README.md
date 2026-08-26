@@ -12,10 +12,19 @@ Worked example (default): **Swansea City 3–1 Charlton Athletic, 2 May 2026
 
 | Region | Content |
 | --- | --- |
-| Masthead | Crests, single-line scoreline, competition / season / date |
-| Left & right panels | Each team's **attacking corners** and **free kicks** (delivery maps over a threat heatmap). Left = home, right = away. Corner graphic has two styles (see `--corner-style`): *hybrid* (delivery arrows coloured by IMPECT corner type over a danger-zone heatmap) or *zones* (a 6-cell target-zone grid shaded/labelled by deliveries landed). |
-| Centre | Split **stat bars** — corners, throw-ins and indirect free-kicks (total + shots / goals / xG created). Each row shows the match value for both teams plus their **season /90** rate and the **% change** vs that rate |
-| Lower band | **Corner** and **free-kick first-contact** tables — attacking & defending, taken/faced, won / lost / win% — for both teams |
+| Masthead | Crests, single-line scoreline, **matchday** (e.g. 46 / 46), competition, date |
+| Left & right panels | Each team's **attacking corners** (top) and, below, **free kicks** + **throw-ins** side by side, each with its own **key underneath**, then that team's **first-contact table** (pinned to the base of the column). Left = home, right = away. Corner graphic has two styles (see `--corner-style`): *hybrid* (arrows coloured by IMPECT corner type over a danger-zone heatmap) or *zones* (a 6-cell target-zone grid). |
+| Centre | A **stat table** — corners, throw-ins, indirect free-kicks and **direct free-kicks** (total + shots / goals / xG created), grouped into labelled sections with row gridlines. Bars use each side's **real club colour**. Each row shows the match value for both teams plus their **season /90** rate and the **% change** vs that rate. |
+
+**Pitch markers.** Every end marker is a circle: **fill = the delivery category, outline ring = the outcome**, and a **gold ★** replaces it when the delivery led to a goal. Fill colours are a colourblind-safe categorical set (Paul Tol "vibrant"), deliberately avoiding red/green so they never clash with the outcome ring.
+
+- **Corners** — fill = where it landed (near / central / far post / short); ring = first contact (green won · red lost · grey uncontested).
+- **Free-kicks** — fill = type, in four buckets: **Cross** (driven), **High ball** (lofted from deep), **Short** (recycled / kept), **Shot** (direct, drawn as a dashed arrow); ring = first contact as above.
+- **Throw-ins** — fill = length (purple long · grey short); ring = possession (green retained · red lost, where *retained* = the throwing team had the next touch).
+
+Every map carries an **"attacking" direction arrow** drawn alongside it, spanning the pitch length (so backward throw-ins are obvious). The corner map has its own two-line key beneath (landed, then first contact); the free-kick and throw-in keys are consolidated in one tidy block under their two maps.
+
+Two colour themes (`--theme`): the cream **light** editorial theme and a charcoal **dark** theme (pitch artwork is redrawn to match, and dark club crests such as Swansea are lifted so they stay legible). The bottom tables have two styles (`--tables`): **team** (aggregate first-contact by team) or **players** (each side's top first-contact winners, by player).
 
 ## Connections
 
@@ -56,7 +65,19 @@ python set_piece_report/run.py --refresh
 # corner graphic style: hybrid (default), zones, or both files for comparison
 python set_piece_report/run.py --corner-style zones
 python set_piece_report/run.py --corner-style both
+
+# colour theme: light (default), dark, or both files
+python set_piece_report/run.py --theme dark
+python set_piece_report/run.py --theme both
+
+# bottom tables: team (default), players (top first-contact winners), or both
+python set_piece_report/run.py --tables players
+python set_piece_report/run.py --tables both
 ```
+
+Filenames carry a suffix per variant: `_corner_zones` (zones), `_players`
+(player tables), `_dark` (dark theme) — so combining `both` options writes every
+permutation as its own file.
 
 Output lands in `outputs/set_piece_report/`. The script pins its own working
 directory, so it runs from anywhere.
@@ -102,8 +123,24 @@ set-piece-report/
   near post / central / far post / short (worked / open-play). The shading under
   the arrows is a kernel-density heatmap of where deliveries land.
 - **Indirect free-kicks** = free-kicks played into the game, not shot directly.
-- **Shots from set-pieces** includes every shot from a corner, free-kick or
-  throw-in (direct free-kick shots included); goals flagged from shot `result`.
+- **Direct free-kicks** = attempts straight at goal (`setPieceSubPhaseFreeKickType
+  == FREE_KICK_SHOT`); the attempt is itself the shot, so goals come off the shot
+  `result`. These are kept out of the indirect-free-kick counts.
+- **Throw-ins** are split *long* (into the final third, fairly central) vs *short*
+  from the delivery end coordinate. Their marker ring shows **possession
+  retained** (green) vs lost (red) — whether the throwing team still had the ball
+  on the next touch — which is the point of the short throw-and-keep routine.
+- **Matchday** is parsed from `matchDayName` ("46. Spieltag"); the total is the
+  competition's highest regular-season round.
+- **Led to goal** (the ★ marker) links a delivery to a goal by shared `setPieceId`
+  (direct free-kicks use the shot `result`).
+- **Club colours** — the bars use each side's brand colour (`config.TEAM_COLORS`),
+  with a contrast guard: if two clubs' colours clash the theme's neutral
+  home/away pair is used instead.
 - **First contact** uses `setPieceSubPhaseFirstTouchWon` (attacking-team view);
   the defending team's wins are the attack's losses. Uncontested / short
   deliveries are excluded from Win%.
+- **First-contact winners** (players view) take the attacking winner from
+  `setPieceSubPhaseFirstTouchPlayerName` (only recorded when the attack wins) and
+  recover the defending winner from the next aerial event after the delivery —
+  which matches the feed's named winner exactly on the cases it does record.

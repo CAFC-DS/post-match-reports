@@ -19,9 +19,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+import numpy as np
 import pandas as pd
 
 from set_piece_report.config import (
+    ANOMALY_THROW,
+    BOX_THROW,
     CORNER_CATEGORIES,
     CORNER_SHORT,
     CORNER_TYPE_ORDER,
@@ -30,6 +33,11 @@ from set_piece_report.config import (
     FREE_KICK_SHOT_TYPE,
     IMPECT_CORNER_TYPE_MAP,
     THROW_IN_CATEGORY,
+    OTHER_THROW,
+    THROW_BOX_MAX_ABS_Y,
+    THROW_BOX_MIN_X,
+    THROW_BOX_START_ZONES,
+    THROW_MAX_DISTANCE,
 )
 from set_piece_report.data import MatchContext
 
@@ -49,10 +57,36 @@ def _indirect_fk_delivery(events: pd.DataFrame) -> pd.Series:
 
 
 def _indirect_fk_event(events: pd.DataFrame) -> pd.Series:
-    """Any event (shot/goal) belonging to an indirect free-kick phase."""
-    return (events["setPieceCategory"] == FREE_KICK_CATEGORY) & (
-        events["action"].astype(str) != DIRECT_FREE_KICK_ACTION
+    """Any event (shot/goal) belonging to an *indirect* free-kick phase.
+
+    Excludes direct free-kick attempts, which are recorded either as an
+    ``action == DIRECT_FREE_KICK`` or with sub-phase type ``FREE_KICK_SHOT``
+    (some are logged as a plain long-range shot in a FREE_KICK_SHOT phase).
+    """
+    return (
+        (events["setPieceCategory"] == FREE_KICK_CATEGORY)
+        & (events["action"].astype(str) != DIRECT_FREE_KICK_ACTION)
+        & (events["setPieceSubPhaseFreeKickType"].astype(str) != FREE_KICK_SHOT_TYPE)
     )
+
+
+def _direct_fk_shot(events: pd.DataFrame) -> pd.Series:
+    """A direct free-kick attempt (a shot straight from the set-piece)."""
+    return (events["actionType"] == "SHOT") & (
+        events["setPieceSubPhaseFreeKickType"].astype(str) == FREE_KICK_SHOT_TYPE
+    )
+
+
+def _scoring_set_piece_ids(events: pd.DataFrame) -> set:
+    """setPieceIds that produced a goal — used to flag deliveries that scored."""
+    goals = events.loc[events["actionType"] == "GOAL", "setPieceId"].dropna()
+    return set(goals.unique())
+
+
+def _led_to_goal(deliveries: pd.DataFrame, scoring_ids: set) -> pd.Series:
+    if "setPieceId" not in deliveries.columns:
+        return pd.Series(False, index=deliveries.index)
+    return deliveries["setPieceId"].isin(scoring_ids)
 
 
 def _first_touch_state(events: pd.DataFrame) -> pd.Series:
@@ -63,6 +97,57 @@ def _first_touch_state(events: pd.DataFrame) -> pd.Series:
     )
 
 
+def _fallback_throw_start_zone(x: float, y: float) -> str | None:
+    """Conservatively derive IMPECT-style start context when it is absent."""
+    if not (np.isfinite(x) and np.isfinite(y)):
+        return None
+    side = "LEFT" if y > 0 else "RIGHT"
+    if x >= 36.0:
+        return f"{side}_CORNER" if abs(y) > 20.16 else "FIRST_THIRD"
+    if x >= 20.0:
+        return f"{side}_WING_BESIDES_BOX" if abs(y) > 20.16 else f"{side}_WING_IN_FRONT_OF_BOX"
+    if x >= -17.5:
+        return "SECOND_THIRD_LEFT" if y > 0 else "SECOND_THIRD_RIGHT"
+    return "FIRST_THIRD"
+
+
+def classify_throw_ins(throws: pd.DataFrame) -> pd.DataFrame:
+    """Attach the shared BOX_THROW / OTHER_THROW / ANOMALY taxonomy."""
+    out = throws.copy()
+    if out.empty:
+        out["throw_group"] = pd.Series(dtype=object)
+        out["throw_start_zone"] = pd.Series(dtype=object)
+        out["throw_anomaly_reason"] = pd.Series(dtype=object)
+        out["throw_distance"] = pd.Series(dtype=float)
+        return out
+    values = {}
+    for name in ("startAdjCoordinatesX", "startAdjCoordinatesY",
+                 "endAdjCoordinatesX", "endAdjCoordinatesY"):
+        values[name] = pd.to_numeric(out.get(name), errors="coerce")
+    sx, sy = values["startAdjCoordinatesX"], values["startAdjCoordinatesY"]
+    ex, ey = values["endAdjCoordinatesX"], values["endAdjCoordinatesY"]
+    out["throw_distance"] = np.hypot(ex - sx, ey - sy)
+    zone_col = out.get("setPieceSubPhaseStartZone", pd.Series(index=out.index, dtype=object))
+    zones = zone_col.astype(str).str.upper().where(zone_col.notna(), None)
+    out["throw_start_zone"] = [
+        _fallback_throw_start_zone(a, b) if pd.isna(z) or z in ("NONE", "NAN") else z
+        for a, b, z in zip(sx, sy, zones)
+    ]
+    missing = sx.isna() | sy.isna() | ex.isna() | ey.isna() | ~np.isfinite(out["throw_distance"])
+    overlong = out["throw_distance"] > THROW_MAX_DISTANCE
+    reaches_box = (ex >= THROW_BOX_MIN_X) & (ey.abs() <= THROW_BOX_MAX_ABS_Y)
+    attacking_start = out["throw_start_zone"].isin(THROW_BOX_START_ZONES)
+    out["throw_anomaly_reason"] = np.where(
+        missing, "missing/non-finite coordinates",
+        np.where(overlong, "distance > 45 m", None),
+    )
+    out["throw_group"] = np.where(
+        missing | overlong, ANOMALY_THROW,
+        np.where(reaches_box & attacking_start, BOX_THROW, OTHER_THROW),
+    )
+    return out
+
+
 # --------------------------------------------------------------------------- #
 # Raw per-team match counts
 # --------------------------------------------------------------------------- #
@@ -71,9 +156,16 @@ def _team_match_counts(events: pd.DataFrame, team: str) -> dict[str, float]:
     corner = _is_corner(events)
     fk_deliv = _indirect_fk_delivery(events)
     fk_event = _indirect_fk_event(events)
-    throw = events["setPieceCategory"] == THROW_IN_CATEGORY
+    direct_fk = _direct_fk_shot(events)
+    throw_deliveries = classify_throw_ins(events.loc[events["actionType"] == "THROW_IN"])
+    valid_throw_deliveries = throw_deliveries[throw_deliveries["throw_group"] != ANOMALY_THROW]
+    anomaly_ids = set(
+        throw_deliveries.loc[throw_deliveries["throw_group"] == ANOMALY_THROW, "setPieceId"].dropna()
+    ) if "setPieceId" in throw_deliveries else set()
+    throw = (events["setPieceCategory"] == THROW_IN_CATEGORY) & ~events["setPieceId"].isin(anomaly_ids)
     shot = events["actionType"] == "SHOT"
     goal = events["actionType"] == "GOAL"
+    success = events["result"].astype(str) == "SUCCESS"
     xg = pd.to_numeric(events["SHOT_XG"], errors="coerce").fillna(0.0)
 
     return {
@@ -82,7 +174,7 @@ def _team_match_counts(events: pd.DataFrame, team: str) -> dict[str, float]:
         "corner_goals": float((atk & corner & goal).sum()),
         "corner_xg": float(xg[atk & corner & shot].sum()),
         # Count throw-ins *taken* (the delivery), not every event in the phase.
-        "throw_ins": float((atk & (events["actionType"] == "THROW_IN")).sum()),
+        "throw_ins": float((valid_throw_deliveries["attackingSquadName"] == team).sum()),
         "throw_in_shots": float((atk & throw & shot).sum()),
         "throw_in_goals": float((atk & throw & goal).sum()),
         "throw_in_xg": float(xg[atk & throw & shot].sum()),
@@ -90,6 +182,11 @@ def _team_match_counts(events: pd.DataFrame, team: str) -> dict[str, float]:
         "fk_shots": float((atk & fk_event & shot).sum()),
         "fk_goals": float((atk & fk_event & goal).sum()),
         "fk_xg": float(xg[atk & fk_event & shot].sum()),
+        # Direct free-kicks: the attempt is itself the shot, so goals come off the
+        # shot result (avoids double-counting the paired GOAL event).
+        "direct_fks": float((atk & direct_fk).sum()),
+        "direct_fk_goals": float((atk & direct_fk & success).sum()),
+        "direct_fk_xg": float(xg[atk & direct_fk].sum()),
     }
 
 
@@ -158,14 +255,17 @@ def build_stat_rows(ctx: MatchContext) -> list[StatRow]:
         row("Shots Created From Corners", "corner_shots"),
         row("Goals From Corners", "corner_goals"),
         row("xG Created From Corners", "corner_xg", decimals=2),
-        row("Total Throw-Ins", "throw_ins", section="THROW-INS"),
-        row("Shots Created From Throw-Ins", "throw_in_shots"),
-        row("Goals From Throw-Ins", "throw_in_goals"),
-        row("xG Created From Throw-Ins", "throw_in_xg", decimals=2),
+        row("Direct Free-Kicks Taken", "direct_fks", section="DIRECT FREE-KICKS"),
+        row("Goals From Direct Free-Kicks", "direct_fk_goals"),
+        row("xG From Direct Free-Kicks", "direct_fk_xg", decimals=2),
         row("Total Indirect Free-Kicks", "indirect_fks", section="INDIRECT FREE-KICKS"),
         row("Shots Created From Indirect Free-Kicks", "fk_shots"),
         row("Goals From Indirect Free-Kicks", "fk_goals"),
         row("xG Created From Indirect Free-Kicks", "fk_xg", decimals=2),
+        row("Total Throw-Ins", "throw_ins", section="THROW-INS"),
+        row("Shots Created From Throw-Ins", "throw_in_shots"),
+        row("Goals From Throw-Ins", "throw_in_goals"),
+        row("xG Created From Throw-Ins", "throw_in_xg", decimals=2),
     ]
 
 
@@ -258,25 +358,34 @@ def corner_deliveries(ctx: MatchContext, team: str) -> pd.DataFrame:
         (ev["actionType"] == "CORNER") & (ev["attackingSquadName"] == team)
     ].copy()
     if corners.empty:
-        return corners.assign(corner_type=pd.Series(dtype=str), first_touch=pd.Series(dtype=str))
+        return corners.assign(
+            corner_type=pd.Series(dtype=str), first_touch=pd.Series(dtype=str),
+            led_to_goal=pd.Series(dtype=bool),
+        )
     corners["corner_type"] = corners.apply(classify_corner_type, axis=1)
     corners["first_touch"] = _first_touch_state(corners).values
+    corners["led_to_goal"] = _led_to_goal(corners, _scoring_set_piece_ids(ev)).values
     return corners
 
 
-def set_piece_shots(ctx: MatchContext, team: str) -> pd.DataFrame:
-    """All shots a team created from set-pieces (corners, free-kicks, throw-ins).
+def set_piece_shots_from_events(events: pd.DataFrame, team: str) -> pd.DataFrame:
+    """All shots a team created from set-pieces (corners, free-kicks, throw-ins)
+    within ``events`` — the shared selection behind :func:`set_piece_shots`,
+    generalised to any events frame (a single match, or a team's season) so
+    both a match value and its season per-90 baseline can be built from the
+    same non-double-counting logic.
 
     Broader than the indirect-free-kick bar section: this includes direct
-    free-kick shots too, since the map is about every set-piece chance created.
-    Goals are flagged from the shot ``result`` (``SUCCESS``).
+    free-kick shots too, since it's about every set-piece chance created.
+    Goals are flagged from the shot ``result`` (``SUCCESS``) rather than a
+    separate ``GOAL``-actionType row, since the feed emits both for the same
+    goal and summing them would double-count it.
     """
-    ev = ctx.match_events
     categories = list(CORNER_CATEGORIES) + [FREE_KICK_CATEGORY, THROW_IN_CATEGORY]
-    shots = ev.loc[
-        (ev["actionType"] == "SHOT")
-        & (ev["attackingSquadName"] == team)
-        & (ev["setPieceCategory"].isin(categories))
+    shots = events.loc[
+        (events["actionType"] == "SHOT")
+        & (events["attackingSquadName"] == team)
+        & (events["setPieceCategory"].isin(categories))
     ].copy()
     if shots.empty:
         return shots.assign(is_goal=pd.Series(dtype=bool))
@@ -284,25 +393,180 @@ def set_piece_shots(ctx: MatchContext, team: str) -> pd.DataFrame:
     return shots
 
 
+def set_piece_shots(ctx: MatchContext, team: str) -> pd.DataFrame:
+    """All shots a team created from set-pieces in this match — see
+    :func:`set_piece_shots_from_events` for the selection logic."""
+    return set_piece_shots_from_events(ctx.match_events, team)
+
+
 def fk_deliveries(ctx: MatchContext, team: str) -> pd.DataFrame:
+    """Indirect free-kick deliveries *and* direct free-kick attempts for a team.
+
+    Direct free-kicks (shots straight at goal) are tagged ``fk_group == "DIRECT"``
+    so the pitch map can distinguish them from played-in deliveries.
+    """
     ev = ctx.match_events
-    fks = ev.loc[_indirect_fk_delivery(ev) & (ev["attackingSquadName"] == team)].copy()
-    if fks.empty:
-        return fks.assign(fk_group=pd.Series(dtype=str), first_touch=pd.Series(dtype=str))
+    scoring = _scoring_set_piece_ids(ev)
 
     def group(t: str) -> str:
         t = str(t)
-        if "CROSS" in t or "BOX" in t:
+        # Distinguish a driven cross from a lofted high ball from deep.
+        if "CROSS" in t:
             return "CROSS"
-        if "HIGH_BALL" in t:
+        if "HIGH_BALL" in t:      # includes HIGH_BALL and HIGH_BALL_BOX
             return "HIGH_BALL"
-        if "POSSESSION" in t:
-            return "INTO_POSSESSION"
-        return "OTHER"
+        # Everything else played into the game = short / recycled / worked.
+        return "SHORT"
 
-    fks["fk_group"] = fks["setPieceSubPhaseFreeKickType"].map(group)
-    fks["first_touch"] = _first_touch_state(fks).values
+    indirect = ev.loc[_indirect_fk_delivery(ev) & (ev["attackingSquadName"] == team)].copy()
+    if not indirect.empty:
+        indirect["fk_group"] = indirect["setPieceSubPhaseFreeKickType"].map(group)
+        indirect["first_touch"] = _first_touch_state(indirect).values
+
+    direct = ev.loc[_direct_fk_shot(ev) & (ev["attackingSquadName"] == team)].copy()
+    if not direct.empty:
+        direct["fk_group"] = "SHOT"
+        # A direct free-kick is the shot; its "first contact" is the strike itself.
+        direct["first_touch"] = direct["result"].astype(str).map(
+            {"SUCCESS": "won"}
+        ).fillna("none").values
+
+    fks = pd.concat([indirect, direct], ignore_index=True)
+    if fks.empty:
+        return fks.assign(
+            fk_group=pd.Series(dtype=str), first_touch=pd.Series(dtype=str),
+            led_to_goal=pd.Series(dtype=bool), is_direct=pd.Series(dtype=bool),
+        )
+    fks["is_direct"] = fks["fk_group"] == "SHOT"
+    goal_by_id = _led_to_goal(fks, scoring)
+    goal_by_result = fks["is_direct"] & (fks["result"].astype(str) == "SUCCESS")
+    fks["led_to_goal"] = (goal_by_id | goal_by_result).values
     return fks
+
+
+def throw_in_deliveries(ctx: MatchContext, team: str) -> pd.DataFrame:
+    """Valid throws, classified identically to the pre-match report.
+
+    ``first_touch`` here encodes **possession**: ``"won"`` when the team keeps the
+    ball after the throw (retained), ``"lost"`` otherwise — so the end marker's
+    ring reads as retained (green) vs lost (red), which is what matters for the
+    short throw-and-retain routines.
+    """
+    ev_all = _chronological(ctx.match_events)
+    mask = (ev_all["actionType"] == "THROW_IN") & (ev_all["attackingSquadName"] == team)
+    positions = np.where(mask.to_numpy())[0]
+    throws = ev_all[mask].copy()
+    if throws.empty:
+        return throws.assign(
+            throw_group=pd.Series(dtype=str), first_touch=pd.Series(dtype=str),
+            retained=pd.Series(dtype=bool), led_to_goal=pd.Series(dtype=bool),
+        )
+
+    retained = []
+    for pos in positions:
+        nxt = ev_all.iloc[pos + 1 : pos + 3]
+        nxt = nxt[nxt["squadName"].astype(str) != "nan"]
+        retained.append(bool(len(nxt)) and str(nxt.iloc[0]["squadName"]) == team)
+
+    throws["retained"] = retained
+    throws = classify_throw_ins(throws)
+    throws = throws.loc[throws["throw_group"] != ANOMALY_THROW].copy()
+    throws["first_touch"] = np.where(throws["retained"], "won", "lost")
+    throws["led_to_goal"] = _led_to_goal(throws, _scoring_set_piece_ids(ctx.match_events)).values
+    return throws
+
+
+# --------------------------------------------------------------------------- #
+# Per-player first-contact winners (for the "by team" table variant)
+# --------------------------------------------------------------------------- #
+# Defending first contacts aren't named in the feed (the first-touch player is
+# only recorded when the *attacking* team wins). We recover the defender from the
+# next aerial event after the delivery, which matches the official winner exactly
+# on the cases the feed does name.
+_CONTEST_ACTIONS = {"HEADER", "CLEARANCE", "BLOCK", "INTERCEPTION", "LOOSE_BALL_REGAIN"}
+
+
+@dataclass
+class PlayerContact:
+    player: str
+    corner_att: int = 0
+    corner_def: int = 0
+    fk_att: int = 0
+    fk_def: int = 0
+    shots: int = 0
+    goals: int = 0
+
+    @property
+    def total(self) -> int:
+        return self.corner_att + self.corner_def + self.fk_att + self.fk_def
+
+
+def _chronological(ev: pd.DataFrame) -> pd.DataFrame:
+    order = [c for c in ("period", "gameTimeInSec", "sequenceIndex") if c in ev.columns]
+    return ev.sort_values(order).reset_index(drop=True) if order else ev.reset_index(drop=True)
+
+
+def _next_contact_player(ev: pd.DataFrame, pos: int) -> tuple[str | None, str | None]:
+    """Player + squad of the first genuine contact after row ``pos``."""
+    for j in range(pos + 1, min(pos + 4, len(ev))):
+        row = ev.iloc[j]
+        player = str(row.get("playerName"))
+        if player in ("nan", "None", ""):
+            continue
+        if str(row.get("action")) in _CONTEST_ACTIONS:
+            return player, str(row.get("squadName"))
+        return None, None       # first touch was a pass/reception → uncontested
+    return None, None
+
+
+def build_player_contacts(ctx: MatchContext) -> dict[str, dict[str, "PlayerContact"]]:
+    """Per team, ``{player -> PlayerContact}`` of first contacts won."""
+    ev = _chronological(ctx.match_events)
+    teams = {ctx.home_team, ctx.away_team}
+    tally: dict[str, dict[str, PlayerContact]] = {t: {} for t in teams}
+
+    def bump(team: str, player: str, category: str, phase: str) -> None:
+        if team not in tally or player in ("nan", "None", ""):
+            return
+        pc = tally[team].setdefault(player, PlayerContact(player))
+        setattr(pc, f"{category}_{phase}", getattr(pc, f"{category}_{phase}") + 1)
+
+    for i in range(len(ev)):
+        row = ev.iloc[i]
+        action = str(row.get("actionType"))
+        is_corner = action == "CORNER"
+        is_fk = action == "FREE_KICK" and str(row.get("setPieceSubPhaseFreeKickType")) != FREE_KICK_SHOT_TYPE
+        if not (is_corner or is_fk):
+            continue
+        category = "corner" if is_corner else "fk"
+        atk = str(row.get("attackingSquadName"))
+        defending = (teams - {atk}).pop() if atk in teams else None
+        won = str(row.get("setPieceSubPhaseFirstTouchWon"))
+        if won == "True":
+            player = str(row.get("setPieceSubPhaseFirstTouchPlayerName"))
+            # Guard against feed mis-tags: only credit the attacking team if
+            # that player's own (majority-vote) squad this match is actually atk.
+            if ctx.player_team.get(player, atk) == atk:
+                bump(atk, player, category, "att")
+        elif won == "False" and defending is not None:
+            player, squad = _next_contact_player(ev, i)
+            if player and squad == defending:
+                bump(defending, player, category, "def")
+
+    # Include attacking players whose set-piece shot came in a recycled
+    # (second-phase) sub-phase, even if they did not win the initial contact.
+    # The category propagation in the raw-source loader makes these shots
+    # visible through the same set-piece selection used by the headline stats.
+    for team in teams:
+        shots = set_piece_shots_from_events(ctx.match_events, team)
+        for _, shot in shots.iterrows():
+            player = str(shot.get("playerName"))
+            if player in ("nan", "None", ""):
+                continue
+            pc = tally[team].setdefault(player, PlayerContact(player))
+            pc.shots += 1
+            pc.goals += int(bool(shot.get("is_goal", False)))
+    return tally
 
 
 # --------------------------------------------------------------------------- #
@@ -312,6 +576,7 @@ def fk_deliveries(ctx: MatchContext, team: str) -> pd.DataFrame:
 class ReportData:
     stat_rows: list[StatRow]
     first_contact: dict[str, "FirstContactTable"]
+    player_contacts: dict[str, dict[str, "PlayerContact"]] = field(default_factory=dict)
     corner_type_counts: dict[str, dict[str, int]] = field(default_factory=dict)
 
 
@@ -327,5 +592,6 @@ def build_report_data(ctx: MatchContext) -> ReportData:
     return ReportData(
         stat_rows=build_stat_rows(ctx),
         first_contact=build_first_contact(ctx),
+        player_contacts=build_player_contacts(ctx),
         corner_type_counts=type_counts,
     )

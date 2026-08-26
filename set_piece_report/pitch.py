@@ -1,10 +1,14 @@
 """Delivery-map graphics for the set-piece report.
 
-Two vertical pitches per team, drawn in the cream / editorial palette:
+Two vertical pitches per team, drawn in the active :class:`~set_piece_report.
+theme.Theme` so the artwork sits on the same paper as the page (cream in light
+mode, charcoal in dark mode):
 
-* :func:`corner_overview`   – attacking-box view, one arrow per corner coloured
+* :func:`corner_overview`    – attacking-box view, one arrow per corner coloured
   by IMPECT corner type (near post / central / far post / short), the landing
   spot ringed when the attacking team won the first contact.
+* :func:`corner_zone_overview` – a 6-cell target-zone grid shaded / labelled by
+  how many deliveries landed in each zone.
 * :func:`free_kick_overview` – full pitch, indirect free-kick deliveries as
   arrows over a soft threat heatmap of where they land.
 
@@ -26,15 +30,7 @@ import pandas as pd  # noqa: E402
 from matplotlib.colors import LinearSegmentedColormap  # noqa: E402
 from mplsoccer import VerticalPitch  # noqa: E402
 
-from set_piece_report.config import (
-    CORNER_TYPE_COLORS,
-    FK_TYPE_COLORS,
-    INK,
-    MUTED,
-    PITCH_LINE,
-    PITCH_SURFACE,
-    RED,
-)
+from set_piece_report.theme import LIGHT, Theme  # noqa: E402
 
 # IMPECT adjusted coords: X in [-52.5, 52.5] (attacking goal at +52.5),
 # Y in [-34, 34]. Shift into a 105 x 68 "custom" pitch.
@@ -59,7 +55,7 @@ def _fig_to_uri(fig) -> str:
     return "data:image/png;base64," + base64.b64encode(buf.read()).decode("ascii")
 
 
-def _pitch(half: bool, pad_bottom: float, figsize) -> tuple:
+def _pitch(theme: Theme, half: bool, pad_bottom: float, figsize) -> tuple:
     pitch = VerticalPitch(
         pitch_type="custom",
         pitch_length=_PITCH_LEN,
@@ -69,8 +65,8 @@ def _pitch(half: bool, pad_bottom: float, figsize) -> tuple:
         pad_bottom=pad_bottom,
         pad_left=1,
         pad_right=1,
-        pitch_color=PITCH_SURFACE,
-        line_color=PITCH_LINE,
+        pitch_color=theme.pitch_surface,
+        line_color=theme.pitch_line,
         linewidth=1.0,
         line_zorder=1,
         goal_type="line",
@@ -78,55 +74,85 @@ def _pitch(half: bool, pad_bottom: float, figsize) -> tuple:
         corner_arcs=True,
     )
     fig, ax = pitch.draw(figsize=figsize)
-    fig.set_facecolor(PITCH_SURFACE)
+    fig.set_facecolor(theme.pitch_surface)
     return pitch, fig, ax
+
+
+def _danger_cmap(theme: Theme) -> LinearSegmentedColormap:
+    return LinearSegmentedColormap.from_list("sp_heat", list(theme.heat_stops))
+
+
+def _goal_star(pitch, ax, theme, x, y, s):
+    pitch.scatter(x, y, ax=ax, s=s, marker="*", color=theme.goal,
+                  edgecolors=theme.goal_edge, linewidth=0.9, zorder=6)
+
+
+def _markers_ring(pitch, ax, theme, ex, ey, fills, outcome, goals,
+                  *, circle=64, star=190):
+    """Delivery end markers: fill = category (landing zone / type / length),
+    **ring colour = outcome** (won-or-retained → green, lost → red, uncontested →
+    grey), and a star when it led to a goal."""
+    ring = {"won": theme.edge_won, "lost": theme.edge_lost}
+    ex = list(ex); ey = list(ey); fills = list(fills)
+    outcome = list(outcome); goals = list(goals)
+    for i in range(len(ex)):
+        if goals[i]:
+            _goal_star(pitch, ax, theme, ex[i], ey[i], star)
+        else:
+            pitch.scatter(ex[i], ey[i], ax=ax, s=circle, marker="o", color=fills[i],
+                          edgecolors=ring.get(outcome[i], theme.edge_none),
+                          linewidth=1.9, zorder=5)
+
+
+def _attack_arrow(theme, ax, lo=0.06, hi=0.94):
+    """A direction arrow drawn *outside* the pitch (to its left), spanning the
+    pitch length and pointing at the attacked goal, labelled 'attacking'."""
+    ax.annotate(
+        "", xy=(-0.055, hi), xytext=(-0.055, lo), xycoords="axes fraction",
+        annotation_clip=False,
+        arrowprops=dict(arrowstyle="-|>", color=theme.red, lw=1.6,
+                        shrinkA=0, shrinkB=0, mutation_scale=9),
+    )
+    ax.text(-0.11, (lo + hi) / 2, "attacking", rotation=90, transform=ax.transAxes,
+            fontsize=5, color=theme.muted, va="center", ha="center",
+            fontweight="bold", clip_on=False)
 
 
 # --------------------------------------------------------------------------- #
 # Corner overview
 # --------------------------------------------------------------------------- #
-def _danger_cmap() -> LinearSegmentedColormap:
-    return LinearSegmentedColormap.from_list(
-        "sp_heat", [PITCH_SURFACE, "#EAD6A6", "#DCA23F", "#C0522B"]
-    )
-
-
-def corner_overview(deliveries: pd.DataFrame) -> str:
+def corner_overview(deliveries: pd.DataFrame, theme: Theme = LIGHT) -> str:
     """Attacking corner delivery map: soft danger zones under the arrows."""
     # Crop to roughly the final 32m so the box fills the frame (landscape).
-    pitch, fig, ax = _pitch(half=True, pad_bottom=-20.5, figsize=(5.2, 3.2))
+    pitch, fig, ax = _pitch(theme, half=True, pad_bottom=-20.5, figsize=(5.2, 3.2))
 
     if deliveries is not None and not deliveries.empty:
-        sx, sy = _to_pitch(deliveries["startAdjCoordinatesX"], deliveries["startAdjCoordinatesY"])
-        ex, ey = _to_pitch(deliveries["endAdjCoordinatesX"], deliveries["endAdjCoordinatesY"])
-        # danger-zone shading = where deliveries land (needs a few points to be stable)
+        d = deliveries.reset_index(drop=True)
+        sx, sy = _to_pitch(d["startAdjCoordinatesX"], d["startAdjCoordinatesY"])
+        ex, ey = _to_pitch(d["endAdjCoordinatesX"], d["endAdjCoordinatesY"])
         valid = ex.notna() & ey.notna()
         if valid.sum() >= 4:
             try:
                 pitch.kdeplot(
                     ex[valid], ey[valid], ax=ax, fill=True, levels=30,
-                    thresh=0.15, cmap=_danger_cmap(), alpha=0.30, zorder=1,
+                    thresh=0.15, cmap=_danger_cmap(theme), alpha=0.30, zorder=1,
                 )
             except Exception:
                 pass
-        for i, (_, row) in enumerate(deliveries.reset_index(drop=True).iterrows()):
-            colour = CORNER_TYPE_COLORS.get(row["corner_type"], RED)
+        fills = [theme.corner_colors.get(t, theme.red) for t in d["corner_type"]]
+        for i in range(len(d)):
             pitch.lines(
                 sx.iloc[i], sy.iloc[i], ex.iloc[i], ey.iloc[i], ax=ax,
-                color=colour, lw=2.4, comet=True, alpha=0.9, zorder=3,
+                color=fills[i], lw=2.4, comet=True, alpha=0.9, zorder=3,
                 capstyle="round",
             )
-            won = row["first_touch"] == "won"
-            pitch.scatter(
-                ex.iloc[i], ey.iloc[i], ax=ax, s=64 if won else 42, color=colour,
-                edgecolors="#FFFFFF" if won else PITCH_SURFACE,
-                linewidth=1.4 if won else 0.7, zorder=4,
-            )
+        _markers_ring(pitch, ax, theme, ex, ey, fills, d["first_touch"], d["led_to_goal"])
     else:
         ax.text(
             _PITCH_WID / 2, _PITCH_LEN - 16, "No attacking corners",
-            ha="center", va="center", color=MUTED, fontsize=9,
+            ha="center", va="center", color=theme.muted, fontsize=9,
         )
+    _attack_arrow(theme, ax)
     return _fig_to_uri(fig)
 
 
@@ -135,10 +161,10 @@ _ZONE_X = np.array([88.5, 99.5, 105.0])                 # deep box, then 6-yard
 _ZONE_Y = np.array([13.85, 27.28, 40.72, 54.15])        # left / central / right
 
 
-def corner_zone_overview(deliveries: pd.DataFrame) -> str:
+def corner_zone_overview(deliveries: pd.DataFrame, theme: Theme = LIGHT) -> str:
     """Attacking corner *target zones*: a 6-cell box grid shaded and labelled by
     how many deliveries landed in each zone."""
-    pitch, fig, ax = _pitch(half=True, pad_bottom=-20.5, figsize=(5.2, 3.2))
+    pitch, fig, ax = _pitch(theme, half=True, pad_bottom=-20.5, figsize=(5.2, 3.2))
 
     ex = ey = None
     if deliveries is not None and not deliveries.empty:
@@ -152,120 +178,112 @@ def corner_zone_overview(deliveries: pd.DataFrame) -> str:
         shaded = grid.copy()
         shaded[shaded == 0] = np.nan          # empty zones stay pitch-coloured
         stat["statistic"] = shaded
-        pitch.heatmap(stat, ax=ax, cmap=_danger_cmap(), alpha=0.62,
-                      edgecolors=PITCH_SURFACE, lw=1.2, zorder=1)
+        pitch.heatmap(stat, ax=ax, cmap=_danger_cmap(theme), alpha=0.62,
+                      edgecolors=theme.pitch_surface, lw=1.2, zorder=1)
         labels = stat.copy()
         labels["statistic"] = grid            # keep zeros; exclude_zeros hides them
-        pitch.label_heatmap(labels, ax=ax, str_format="{:.0f}", color=INK,
+        pitch.label_heatmap(labels, ax=ax, str_format="{:.0f}", color=theme.ink,
                             fontsize=11, fontweight="bold", zorder=3,
                             ha="center", va="center", exclude_zeros=True)
     else:
         ax.text(_PITCH_WID / 2, _PITCH_LEN - 16, "No attacking corners",
-                ha="center", va="center", color=MUTED, fontsize=9)
+                ha="center", va="center", color=theme.muted, fontsize=9)
+    _attack_arrow(theme, ax)
     return _fig_to_uri(fig)
 
 
 # --------------------------------------------------------------------------- #
-# Free-kick overview
+# Free-kick overview  (indirect deliveries + direct free-kick attempts)
 # --------------------------------------------------------------------------- #
-def free_kick_overview(deliveries: pd.DataFrame) -> str:
-    """Indirect free-kick delivery map over a soft landing-zone heatmap."""
-    pitch, fig, ax = _pitch(half=False, pad_bottom=1, figsize=(4.2, 5.6))
+def free_kick_overview(deliveries: pd.DataFrame, theme: Theme = LIGHT) -> str:
+    """Free-kick map: indirect deliveries over a threat heatmap, with direct
+    free-kicks (shots) drawn in their own colour."""
+    pitch, fig, ax = _pitch(theme, half=False, pad_bottom=1, figsize=(3.9, 5.4))
 
     if deliveries is not None and not deliveries.empty:
-        ex, ey = _to_pitch(deliveries["endAdjCoordinatesX"], deliveries["endAdjCoordinatesY"])
-        sx, sy = _to_pitch(deliveries["startAdjCoordinatesX"], deliveries["startAdjCoordinatesY"])
-        valid_end = ex.notna() & ey.notna()
+        d = deliveries.reset_index(drop=True)
+        ex, ey = _to_pitch(d["endAdjCoordinatesX"], d["endAdjCoordinatesY"])
+        sx, sy = _to_pitch(d["startAdjCoordinatesX"], d["startAdjCoordinatesY"])
+        indirect = (d["fk_group"] != "DIRECT")
+        valid_end = ex.notna() & ey.notna() & indirect
         if valid_end.sum() >= 5:
             try:
                 pitch.kdeplot(
                     ex[valid_end], ey[valid_end], ax=ax, fill=True, levels=40,
-                    thresh=0.12, cmap=_danger_cmap(), alpha=0.32, zorder=1,
+                    thresh=0.12, cmap=_danger_cmap(theme), alpha=0.32, zorder=1,
                 )
             except Exception:
                 pass
-        for i, (_, row) in enumerate(deliveries.reset_index(drop=True).iterrows()):
-            colour = FK_TYPE_COLORS.get(row["fk_group"], MUTED)
-            recycle = row["fk_group"] == "INTO_POSSESSION"
+        fills = [theme.fk_colors.get(g, theme.muted) for g in d["fk_group"]]
+        for i in range(len(d)):
+            recycle = d["fk_group"].iloc[i] == "SHORT"
+            direct = d["fk_group"].iloc[i] == "SHOT"
             pitch.lines(
                 sx.iloc[i], sy.iloc[i], ex.iloc[i], ey.iloc[i], ax=ax,
-                color=colour, lw=1.8, comet=True,
-                alpha=0.45 if recycle else 0.85, zorder=3, capstyle="round",
+                color=fills[i], lw=2.2 if direct else 1.8, comet=True,
+                alpha=0.5 if recycle else 0.9, zorder=3, capstyle="round",
+                linestyle="--" if direct else "-",
             )
-            won = row["first_touch"] == "won"
-            pitch.scatter(
-                ex.iloc[i], ey.iloc[i], ax=ax, s=44 if won else 24, color=colour,
-                edgecolors="#FFFFFF" if won else PITCH_SURFACE,
-                linewidth=1.2 if won else 0.6,
-                alpha=0.5 if recycle else 1.0, zorder=4,
-            )
+        _markers_ring(pitch, ax, theme, ex, ey, fills, d["first_touch"], d["led_to_goal"],
+                      circle=50, star=165)
     else:
         ax.text(
-            _PITCH_WID / 2, _PITCH_LEN / 2, "No indirect free-kicks",
-            ha="center", va="center", color=MUTED, fontsize=9,
+            _PITCH_WID / 2, _PITCH_LEN / 2, "No free-kicks",
+            ha="center", va="center", color=theme.muted, fontsize=9,
         )
+    _attack_arrow(theme, ax)
     return _fig_to_uri(fig)
 
 
 # --------------------------------------------------------------------------- #
-# Set-piece shot map
+# Throw-in overview
 # --------------------------------------------------------------------------- #
-_SHOT_NONGOAL = "#7F8DA3"
+def throw_in_overview(deliveries: pd.DataFrame, theme: Theme = LIGHT) -> str:
+    """Valid throw-ins, distinguishing box throws from all other throws."""
+    pitch, fig, ax = _pitch(theme, half=False, pad_bottom=1, figsize=(3.9, 5.4))
 
-
-def _shot_sizes(xg: pd.Series) -> pd.Series:
-    clean = pd.to_numeric(xg, errors="coerce").fillna(0.03).clip(lower=0.01, upper=0.6)
-    return 34 + (clean / 0.6) * 300
-
-
-def set_piece_shot_map(shots: pd.DataFrame) -> str:
-    """Half-pitch of shots created from set-pieces; dot size = xG, goals in red."""
-    pitch, fig, ax = _pitch(half=True, pad_bottom=-16, figsize=(5.0, 3.4))
-
-    if shots is not None and not shots.empty:
-        sx, sy = _to_pitch(shots["startAdjCoordinatesX"], shots["startAdjCoordinatesY"])
-        sizes = _shot_sizes(shots["SHOT_XG"]).reset_index(drop=True)
-        goal = shots["is_goal"].reset_index(drop=True)
-        sx = sx.reset_index(drop=True)
-        sy = sy.reset_index(drop=True)
-        if (~goal).any():
-            pitch.scatter(
-                sx[~goal], sy[~goal], ax=ax, s=sizes[~goal], color=_SHOT_NONGOAL,
-                edgecolors=PITCH_SURFACE, linewidth=0.7, alpha=0.8, zorder=3,
+    if deliveries is not None and not deliveries.empty:
+        d = deliveries.reset_index(drop=True)
+        ex, ey = _to_pitch(d["endAdjCoordinatesX"], d["endAdjCoordinatesY"])
+        sx, sy = _to_pitch(d["startAdjCoordinatesX"], d["startAdjCoordinatesY"])
+        fills = [theme.throw_colors.get(g, theme.muted) for g in d["throw_group"]]
+        for i in range(len(d)):
+            other = d["throw_group"].iloc[i] == "OTHER_THROW"
+            pitch.lines(
+                sx.iloc[i], sy.iloc[i], ex.iloc[i], ey.iloc[i], ax=ax,
+                color=fills[i], lw=1.6, comet=True,
+                alpha=0.55 if other else 0.9, zorder=3, capstyle="round",
             )
-        if goal.any():
-            # goals always read clearly, even from a low-xG finish
-            goal_sizes = sizes[goal].clip(lower=110)
-            pitch.scatter(
-                sx[goal], sy[goal], ax=ax, s=goal_sizes, color=RED, marker="o",
-                edgecolors="#FFFFFF", linewidth=1.6, zorder=5,
-            )
+        _markers_ring(pitch, ax, theme, ex, ey, fills, d["first_touch"], d["led_to_goal"],
+                      circle=54, star=165)
     else:
         ax.text(
-            _PITCH_WID / 2, _PITCH_LEN - 12, "No set-piece shots",
-            ha="center", va="center", color=MUTED, fontsize=9,
+            _PITCH_WID / 2, _PITCH_LEN / 2, "No throw-ins",
+            ha="center", va="center", color=theme.muted, fontsize=9,
         )
+    _attack_arrow(theme, ax)
     return _fig_to_uri(fig)
 
 
 # --------------------------------------------------------------------------- #
-# Legend swatches (kept here so colours have one source of truth)
+# Legend swatches (colours come from the active theme so they match the artwork)
 # --------------------------------------------------------------------------- #
-def shot_legend_items() -> list[tuple[str, str]]:
-    return [("Shot (size = xG)", _SHOT_NONGOAL), ("Goal", RED)]
-
-
-def corner_legend_items() -> list[tuple[str, str]]:
+def corner_legend_items(theme: Theme = LIGHT) -> list[tuple[str, str]]:
     from set_piece_report.config import CORNER_TYPE_LABELS, CORNER_TYPE_ORDER
 
-    return [(CORNER_TYPE_LABELS[t], CORNER_TYPE_COLORS[t]) for t in CORNER_TYPE_ORDER]
+    return [(CORNER_TYPE_LABELS[t], theme.corner_colors[t]) for t in CORNER_TYPE_ORDER]
 
 
-def fk_legend_items() -> list[tuple[str, str]]:
+def fk_legend_items(theme: Theme = LIGHT) -> list[tuple[str, str]]:
     labels = {
-        "CROSS": "Cross / box",
+        "CROSS": "Cross",
         "HIGH_BALL": "High ball",
-        "INTO_POSSESSION": "Into possession",
-        "OTHER": "Other",
+        "SHORT": "Short",
+        "SHOT": "Shot",
     }
-    return [(labels[k], FK_TYPE_COLORS[k]) for k in labels]
+    return [(labels[k], theme.fk_colors[k]) for k in labels]
+
+
+def throw_legend_items(theme: Theme = LIGHT) -> list[tuple[str, str]]:
+    return [("Into box", theme.throw_colors["BOX_THROW"]),
+            ("Other", theme.throw_colors["OTHER_THROW"])]

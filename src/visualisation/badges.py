@@ -31,6 +31,7 @@ TEAM_BADGE_FILES: dict[str, str] = {
     "Hull City":             "Hull_City_A.F.C._logo.svg.png",
     "Ipswich Town":          "Ipswich_Town.svg.png",
     "Leicester City":        "Leicester_City_crest.svg.png",
+    "Lincoln City":          "Lincoln_City_FC_2024_crest.svg.png",
     "Norwich City":          "Norwich_City.png",
     "Oxford United":         "Oxford_United_FC_logo.svg.png",
     "Preston North End":     "Preston_North_End_FC.svg.png",

@@ -27,9 +27,41 @@ PITCH_SURFACE = "#F4EFE4"
 PITCH_LINE = "#C4BAA0"     # soft warm grey markings
 PITCH_LINE_SOFT = "#DBD2BC"
 
-# Per-team bar colours (home = blue, away = red) echo the example layout.
+# Per-team bar colours (home = blue, away = red) — the neutral fallback pair
+# used when a club isn't in ``TEAM_COLORS`` or two brands clash. Real club
+# colours (below) are preferred; see ``theme.resolve_bar_colors``.
 HOME_BAR = BLUE
 AWAY_BAR = RED
+
+# Primary brand colour per Championship 25/26 club, used for the stat bars so a
+# fixture reads in its own colours. Kept mid-tone where possible; ``theme`` lifts
+# very dark crests for dark mode and guards against same-match clashes.
+TEAM_COLORS = {
+    "AFC Wrexham": "#D50032",
+    "Birmingham City": "#20438A",
+    "Blackburn Rovers": "#009FE3",
+    "Bristol City": "#E30613",
+    "Charlton Athletic": "#D01012",
+    "Coventry City": "#6CADDF",
+    "Derby County": "#1C1C1C",
+    "FC Middlesbrough": "#E11B38",
+    "FC Millwall": "#00285E",
+    "FC Portsmouth": "#001489",
+    "FC Southampton": "#D71920",
+    "FC Watford": "#E8B900",
+    "Hull City": "#F5A12D",
+    "Ipswich Town": "#16478E",
+    "Leicester City": "#0053A0",
+    "Norwich City": "#00A94F",
+    "Oxford United": "#E4A400",
+    "Preston North End": "#0B3D7B",
+    "Queens Park Rangers": "#005CAB",
+    "Sheffield United": "#EE2737",
+    "Sheffield Wednesday": "#0060A9",
+    "Stoke City": "#E03A3E",
+    "Swansea City": "#1A1A1A",
+    "West Bromwich Albion": "#0B2265",
+}
 
 # --- corner taxonomy (IMPECT setPieceSubPhaseCornerType) ----------------------
 CORNER_SHORT = "SHORT"
@@ -43,11 +75,14 @@ CORNER_TYPE_LABELS = {
     CORNER_FAR: "Far post",
     CORNER_SHORT: "Short",
 }
+# Landing-zone colours: a colourblind-safe categorical set (Paul Tol "vibrant"),
+# deliberately avoiding red/green — those are reserved for the first-contact
+# outcome ring (won / lost) so the two channels never clash.
 CORNER_TYPE_COLORS = {
-    CORNER_NEAR: "#D8A21B",       # gold
-    CORNER_CENTRAL: "#2E8C86",    # teal
-    CORNER_FAR: "#C0392B",        # brick red
-    CORNER_SHORT: "#7F8DA3",      # muted blue-grey
+    CORNER_NEAR: "#EE7733",       # orange
+    CORNER_CENTRAL: "#0077BB",    # blue
+    CORNER_FAR: "#AA3377",        # magenta / purple
+    CORNER_SHORT: "#33BBEE",      # cyan
 }
 # Legend / draw order, near-post first (most common threatening delivery).
 CORNER_TYPE_ORDER = [CORNER_NEAR, CORNER_CENTRAL, CORNER_FAR, CORNER_SHORT]
@@ -72,6 +107,21 @@ FK_TYPE_COLORS = {
 CORNER_CATEGORIES = ("CORNER_LEFT", "CORNER_RIGHT")
 FREE_KICK_CATEGORY = "FREE_KICK"
 THROW_IN_CATEGORY = "THROW_IN"
+
+# IMPECT identifies throw-ins but does not provide a native long-throw subtype.
+# Keep this taxonomy aligned with the pre-match set-piece report: provider start
+# zone is authoritative, with endpoint geometry and a 45 m plausibility ceiling.
+BOX_THROW = "BOX_THROW"
+OTHER_THROW = "OTHER_THROW"
+ANOMALY_THROW = "ANOMALY"
+THROW_BOX_MIN_X = 34.5
+THROW_BOX_MAX_ABS_Y = 22.0
+THROW_MAX_DISTANCE = 45.0
+THROW_BOX_START_ZONES = frozenset({
+    "LEFT_WING_BESIDES_BOX", "RIGHT_WING_BESIDES_BOX",
+    "LEFT_WING_IN_FRONT_OF_BOX", "RIGHT_WING_IN_FRONT_OF_BOX",
+    "LEFT_CORNER", "RIGHT_CORNER",
+})
 FREE_KICK_SHOT_TYPE = "FREE_KICK_SHOT"
 DIRECT_FREE_KICK_ACTION = "DIRECT_FREE_KICK"
 

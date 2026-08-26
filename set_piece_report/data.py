@@ -10,6 +10,7 @@ map.
 
 from __future__ import annotations
 
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -34,6 +35,8 @@ class MatchContext:
     date: pd.Timestamp
     competition: str
     season: str
+    matchday: int | None            # this fixture's league round (e.g. 46)
+    matchday_total: int | None      # regular-season rounds in the competition
     home_team: str
     away_team: str
     home_goals: int
@@ -42,6 +45,12 @@ class MatchContext:
     home_season_events: pd.DataFrame    # home team's regular-season events
     away_season_events: pd.DataFrame    # away team's regular-season events
     player_team: dict[str, str]         # player name -> squad name (this match)
+    # Whether the /90 and % change columns are meaningful enough to show.
+    # False at matchday 1 of a season sourced from itself (no season history
+    # yet to compare against) -- see impect_cafcdb_source.load_match_context
+    # for the other case this covers (a new-season fixture whose baseline is
+    # borrowed from last season entirely, not "this season so far").
+    show_comparisons: bool
 
     @property
     def score_line(self) -> str:
@@ -67,6 +76,23 @@ def _team_regular_season(df: pd.DataFrame, team: str) -> pd.DataFrame:
     return df.loc[mask].copy()
 
 
+_MATCHDAY_RE = re.compile(r"(\d+)\.\s*Spieltag")
+
+
+def _matchday_number(name: object) -> int | None:
+    m = _MATCHDAY_RE.search(str(name))
+    return int(m.group(1)) if m else None
+
+
+def _matchday_info(league: pd.DataFrame, competition: str, match_name: object) -> tuple[int | None, int | None]:
+    """This fixture's round number and the competition's regular-season total."""
+    current = _matchday_number(match_name)
+    comp = league.loc[league["competitionName"] == competition, "matchDayName"]
+    nums = [n for n in (_matchday_number(v) for v in comp.dropna().unique()) if n]
+    total = max(nums) if nums else None
+    return current, total
+
+
 def _count_goals(match: pd.DataFrame, team: str) -> int:
     return int(
         ((match["actionType"] == "GOAL") & (match["squadName"] == team)).sum()
@@ -86,6 +112,8 @@ def load_match_context(match_id: int, refresh: bool = False) -> MatchContext:
 
     home = str(match["homeSquadName"].iloc[0])
     away = str(match["awaySquadName"].iloc[0])
+    competition = str(match["competitionName"].iloc[0])
+    matchday, matchday_total = _matchday_info(league, competition, match["matchDayName"].iloc[0])
 
     player_team = (
         match.dropna(subset=["playerName", "squadName"])
@@ -97,8 +125,10 @@ def load_match_context(match_id: int, refresh: bool = False) -> MatchContext:
     return MatchContext(
         match_id=int(match_id),
         date=match["_dt"].iloc[0],
-        competition=str(match["competitionName"].iloc[0]),
+        competition=competition,
         season=str(match["season"].iloc[0]),
+        matchday=matchday,
+        matchday_total=matchday_total,
         home_team=home,
         away_team=away,
         home_goals=_count_goals(match, home),
@@ -107,4 +137,5 @@ def load_match_context(match_id: int, refresh: bool = False) -> MatchContext:
         home_season_events=_team_regular_season(league, home),
         away_season_events=_team_regular_season(league, away),
         player_team=player_team,
+        show_comparisons=(matchday or 1) != 1,
     )
