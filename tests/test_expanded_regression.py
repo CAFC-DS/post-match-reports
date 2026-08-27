@@ -17,7 +17,9 @@ def test_west_ham_golden_is_the_expected_report():
     assert "West Ham United 1 - 2" in text
     assert "Charlton Athletic" in text
     assert "22/08/2026" in text
-    assert "DEFENSIVE TRANSITION RESPONSE" in text
+    # Chrome's letter-spaced section heading is extracted inconsistently by
+    # pypdf across platforms; this page-level KPI label is stable.
+    assert "COUNTER-PRESS REGAINS" in text
 
 
 def test_metadata_only_changes_compare_exactly(tmp_path):
