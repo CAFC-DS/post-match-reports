@@ -75,11 +75,18 @@ def _bar_widths(home: float, away: float) -> tuple[float, float]:
 
 def _badge_uri(team: str) -> str | None:
     try:
-        from src.visualisation.badges import badge_data_uri
+        # In the consolidated repository, use its complete current-season
+        # badge catalogue rather than this report's historic vendored subset.
+        from post_match_reports.badges import badge_data_uri
 
         return badge_data_uri(team)
     except Exception:
-        return None
+        try:
+            from src.visualisation.badges import badge_data_uri
+
+            return badge_data_uri(team)
+        except Exception:
+            return None
 
 
 def _bar_row(r, show_comparisons: bool, goal_row=None) -> dict[str, Any]:

@@ -4,6 +4,7 @@ import pandas as pd
 import pytest
 
 from src.dvms.loaders import fixtures
+from src.report import render_combined
 from src.report.render_combined import FixtureMismatchError, _assert_same_fixture
 
 
@@ -75,3 +76,16 @@ def test_auto_fixture_match_rejects_same_date_identity_conflict(monkeypatch):
         fixtures.resolve_fixture_for_match(
             "Charlton Athletic", "Derby County", pd.Timestamp("2026-08-15")
         )
+
+
+def test_strict_board_report_rejects_partial_data(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        render_combined,
+        "build_context",
+        lambda *args, **kwargs: {
+            "report_mode": "mixed",
+            "source_warnings": ["physical data missing"],
+        },
+    )
+    with pytest.raises(RuntimeError, match="requires complete DVMS data"):
+        render_combined.render_report(1, "2", output_dir=tmp_path, strict_data=True)

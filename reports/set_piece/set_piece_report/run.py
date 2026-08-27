@@ -79,7 +79,12 @@ def main() -> None:
     print(f"  corners : {', '.join(styles)}")
     print(f"  theme   : {', '.join(themes)}")
     print(f"  tables  : {', '.join(tables)}")
-    print(f"  source  : {'Snowflake (refresh)' if args.refresh else 'cached parquet (data/processed)'}")
+    source_label = (
+        "CAFC_DB.IMPECT_RAW"
+        if args.source == "cafcdb"
+        else ("Snowflake staging (refresh)" if args.refresh else "cached staging parquet")
+    )
+    print(f"  source  : {source_label}")
     print()
 
     print("Done. Output files:")

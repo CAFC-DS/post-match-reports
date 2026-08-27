@@ -1,0 +1,244 @@
+name: Generate and deliver post-match reports
+
+on:
+  workflow_dispatch:
+    inputs:
+      impect_match_id:
+        description: "Optional explicit Impect match ID"
+        required: false
+        type: string
+      dvms_match_id:
+        description: "Optional explicit DVMS/Opta match ID"
+        required: false
+        type: string
+      send_email:
+        description: "Email and publish the bundle"
+        default: false
+        type: boolean
+      test_recipient:
+        description: "Optional recipient override for a test send"
+        required: false
+        type: string
+  schedule:
+    # The gate below selects 10:00, 12:00, 14:00, 16:00 and 18:00 London
+    # time from this union of GMT/BST UTC hours.
+    - cron: "0 9-18 * * *"
+
+concurrency:
+  group: post-match-delivery
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  id-token: write
+  issues: write
+
+jobs:
+  reports:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    environment: production
+    env:
+      SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+      SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
+      SNOWFLAKE_ROLE: ${{ secrets.SNOWFLAKE_ROLE }}
+      SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
+      SNOWFLAKE_DATABASE: ${{ secrets.SNOWFLAKE_DATABASE }}
+      SNOWFLAKE_SCHEMA: ${{ secrets.SNOWFLAKE_SCHEMA }}
+      SNOWFLAKE_PRIVATE_KEY_PASSPHRASE: ${{ secrets.SNOWFLAKE_PRIVATE_KEY_PASSPHRASE }}
+      DVMS_ROLE: DEV_ROLE
+      DVMS_WAREHOUSE: DEVELOPMENT_WH
+      DVMS_DATABASE: CAFC_DB
+      CAFC_DVMS_CACHE: ${{ github.workspace }}/.cache/cafc-dvms
+    steps:
+      - name: Gate London schedule
+        id: gate
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          elif [[ " 10 12 14 16 18 " == *" $(TZ=Europe/London date +%H) "* ]]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - if: steps.gate.outputs.run == 'true'
+        uses: actions/checkout@v4
+
+      - if: steps.gate.outputs.run == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+
+      - name: Install browser
+        if: steps.gate.outputs.run == 'true'
+        id: chrome
+        uses: browser-actions/setup-chrome@v1
+
+      - name: Install report dependencies
+        if: steps.gate.outputs.run == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libpango-1.0-0 libpangoft2-1.0-0
+          pip install -r requirements.txt
+          pip install -r reports/set_piece/requirements.txt
+
+      - name: Restore DVMS cache
+        if: steps.gate.outputs.run == 'true'
+        uses: actions/cache@v4
+        with:
+          path: .cache/cafc-dvms
+          key: dvms-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            dvms-${{ runner.os }}-
+
+      - name: Write Snowflake private key
+        if: steps.gate.outputs.run == 'true'
+        env:
+          SNOWFLAKE_PRIVATE_KEY_PEM: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
+        run: |
+          printf '%s' "$SNOWFLAKE_PRIVATE_KEY_PEM" > "$RUNNER_TEMP/snowflake_key.pem"
+          chmod 600 "$RUNNER_TEMP/snowflake_key.pem"
+          echo "SNOWFLAKE_PRIVATE_KEY_PATH=$RUNNER_TEMP/snowflake_key.pem" >> "$GITHUB_ENV"
+
+      - name: Resolve fixture
+        if: steps.gate.outputs.run == 'true'
+        id: fixture
+        env:
+          EXPLICIT_IMPECT: ${{ inputs.impect_match_id }}
+          EXPLICIT_DVMS: ${{ inputs.dvms_match_id }}
+          AUTOMATION_START_DATE: ${{ vars.AUTOMATION_START_DATE }}
+          CAFC_TEAM_NAME: ${{ vars.CAFC_TEAM_NAME }}
+        run: |
+          if [ -n "$EXPLICIT_IMPECT" ] || [ -n "$EXPLICIT_DVMS" ]; then
+            if [ -z "$EXPLICIT_IMPECT" ] || [ -z "$EXPLICIT_DVMS" ]; then
+              echo "Both explicit match IDs are required" >&2
+              exit 2
+            fi
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+            echo "impect_id=$EXPLICIT_IMPECT" >> "$GITHUB_OUTPUT"
+            echo "dvms_id=$EXPLICIT_DVMS" >> "$GITHUB_OUTPUT"
+          else
+            discovery_args=(--team "${CAFC_TEAM_NAME:-Charlton Athletic}" --json)
+            if [ -n "$AUTOMATION_START_DATE" ]; then
+              discovery_args+=(--not-before "$AUTOMATION_START_DATE")
+            fi
+            python -m post_match_reports discover "${discovery_args[@]}" > "$RUNNER_TEMP/discovery.json"
+            python - "$RUNNER_TEMP/discovery.json" "$GITHUB_OUTPUT" <<'PY'
+          import json, sys
+          data = json.load(open(sys.argv[1]))
+          with open(sys.argv[2], "a") as out:
+              out.write(f"ready={str(data['ready']).lower()}\n")
+              if data["ready"]:
+                  out.write(f"impect_id={data['fixture']['impect_match_id']}\n")
+                  out.write(f"dvms_id={data['fixture']['dvms_match_id']}\n")
+          PY
+          fi
+
+      - name: Check delivery release
+        if: steps.fixture.outputs.ready == 'true'
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: match-${{ steps.fixture.outputs.impect_id }}
+        run: |
+          if gh release view "$TAG" --json isDraft > "$RUNNER_TEMP/release.json" 2>/dev/null; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            draft="$(jq -r .isDraft "$RUNNER_TEMP/release.json")"
+            echo "draft=$draft" >> "$GITHUB_OUTPUT"
+            echo "A release already exists for $TAG; automatic resend is blocked."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "draft=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Flag interrupted delivery
+        if: steps.release.outputs.draft == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: match-${{ steps.fixture.outputs.impect_id }}
+        run: |
+          title="Delivery blocked: $TAG has a draft release"
+          if [ -z "$(gh issue list --state open --search "$title in:title" --json number --jq '.[0].number // empty')" ]; then
+            gh issue create --title "$title" --body \
+              "Check the shared mailbox Sent Items, then publish or delete the draft release before a deliberate rerun."
+          fi
+          echo "$title" >&2
+          exit 1
+
+      - name: Generate complete bundle
+        if: steps.fixture.outputs.ready == 'true' && steps.release.outputs.exists == 'false'
+        env:
+          CHROME_BIN: ${{ steps.chrome.outputs.chrome-path }}
+        run: |
+          python -m post_match_reports generate \
+            --impect-match-id "${{ steps.fixture.outputs.impect_id }}" \
+            --dvms-match-id "${{ steps.fixture.outputs.dvms_id }}" \
+            --output-dir "dist/${{ steps.fixture.outputs.impect_id }}" \
+            --manifest "dist/${{ steps.fixture.outputs.impect_id }}/manifest.json"
+
+      - name: Upload diagnostic bundle
+        if: steps.fixture.outputs.ready == 'true' && steps.release.outputs.exists == 'false'
+        uses: actions/upload-artifact@v4
+        with:
+          name: post-match-${{ steps.fixture.outputs.impect_id }}
+          path: dist/${{ steps.fixture.outputs.impect_id }}/
+          retention-days: 30
+
+      - name: Create draft archive release
+        if: >-
+          steps.fixture.outputs.ready == 'true' &&
+          steps.release.outputs.exists == 'false' &&
+          (github.event_name == 'schedule' || inputs.send_email)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: match-${{ steps.fixture.outputs.impect_id }}
+        run: |
+          gh release create "$TAG" dist/${{ steps.fixture.outputs.impect_id }}/* \
+            --draft --title "Post-match reports $TAG" \
+            --notes "delivery_status: ready"
+
+      - name: Sign in to Microsoft Graph
+        if: >-
+          steps.fixture.outputs.ready == 'true' &&
+          steps.release.outputs.exists == 'false' &&
+          (github.event_name == 'schedule' || inputs.send_email)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
+
+      - name: Get Graph access token
+        if: >-
+          steps.fixture.outputs.ready == 'true' &&
+          steps.release.outputs.exists == 'false' &&
+          (github.event_name == 'schedule' || inputs.send_email)
+        run: |
+          token="$(az account get-access-token --resource-type ms-graph --query accessToken -o tsv)"
+          echo "::add-mask::$token"
+          echo "GRAPH_ACCESS_TOKEN=$token" >> "$GITHUB_ENV"
+
+      - name: Email distribution list
+        if: >-
+          steps.fixture.outputs.ready == 'true' &&
+          steps.release.outputs.exists == 'false' &&
+          (github.event_name == 'schedule' || inputs.send_email)
+        env:
+          MAIL_SENDER: ${{ vars.MAIL_SENDER }}
+          MAIL_RECIPIENT: ${{ inputs.test_recipient || vars.MAIL_RECIPIENT }}
+        run: python -m post_match_reports.graph_mail "dist/${{ steps.fixture.outputs.impect_id }}/manifest.json"
+
+      - name: Publish delivered archive
+        if: >-
+          steps.fixture.outputs.ready == 'true' &&
+          steps.release.outputs.exists == 'false' &&
+          (github.event_name == 'schedule' || inputs.send_email)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: match-${{ steps.fixture.outputs.impect_id }}
+        run: |
+          gh release edit "$TAG" --draft=false \
+            --notes "delivery_status: sent\ndelivered_at_utc: $(date -u +%FT%TZ)"

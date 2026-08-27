@@ -6,3 +6,4 @@ data/processed/
 outputs/
 .pytest_cache/
 .DS_Store
+dist/

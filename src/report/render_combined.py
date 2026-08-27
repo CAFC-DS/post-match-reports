@@ -350,8 +350,12 @@ def build_context(impect_match_id: int, dvms_opta_match_id: str | None = None,
 def render_report(impect_match_id: int, dvms_opta_match_id: str | None = None,
                    output_dir: Path | str = DEFAULT_OUTPUT_DIR,
                    formats: tuple[str, ...] = ("html", "pdf"),
-                   force_impect_only: bool = False) -> dict[str, Path]:
+                   force_impect_only: bool = False,
+                   strict_data: bool = False) -> dict[str, Path]:
     context = build_context(impect_match_id, dvms_opta_match_id, force_impect_only)
+    if strict_data and (context["report_mode"] != "combined" or context["source_warnings"]):
+        details = "; ".join(context["source_warnings"]) or context["report_mode"]
+        raise RuntimeError(f"Board report requires complete DVMS data: {details}")
 
     env = Environment(
         loader=FileSystemLoader(str(TEMPLATES_DIR)),

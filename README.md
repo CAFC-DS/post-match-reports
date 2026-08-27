@@ -1,4 +1,32 @@
-# Post-match report
+# CAFC post-match reports
+
+Private production bundle for Charlton Athletic first-team fixtures:
+
+1. the 16-page expanded analyst report;
+2. the one-page board report;
+3. the one-page set-piece report (light theme, hybrid corners, player tables).
+
+Generate all three reports and a validated manifest with:
+
+```bash
+python -m post_match_reports generate \
+  --impect-match-id 267843 \
+  --dvms-match-id 2647272 \
+  --output-dir dist/267843
+```
+
+Discover the latest completed fixture for which every production source is
+ready with:
+
+```bash
+python -m post_match_reports discover \
+  --team "Charlton Athletic" --not-before 2026-08-29 --json
+```
+
+Deployment and delivery configuration is documented in
+[`docs/automation.md`](docs/automation.md).
+
+## Board report
 
 Canonical one-page A4 post-match report for Charlton Athletic.
 
