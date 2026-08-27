@@ -7,9 +7,9 @@ import os
 import time
 from pathlib import Path
 from typing import Iterable
-from urllib.parse import quote
-
 import requests
+
+from .delegated_auth import delegated_access_token
 
 
 GRAPH_ROOT = "https://graph.microsoft.com/v1.0"
@@ -53,8 +53,8 @@ def _recipients(addresses: Iterable[str]) -> list[dict]:
     ]
 
 
-def _attach(client: GraphClient, sender: str, message_id: str, path: Path) -> None:
-    messages = f"{GRAPH_ROOT}/users/{quote(sender)}/messages/{message_id}"
+def _attach(client: GraphClient, message_id: str, path: Path) -> None:
+    messages = f"{GRAPH_ROOT}/me/messages/{message_id}"
     mime = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
     size = path.stat().st_size
     if size < DIRECT_ATTACHMENT_LIMIT:
@@ -99,7 +99,6 @@ def _attach(client: GraphClient, sender: str, message_id: str, path: Path) -> No
 
 def send_report_bundle(
     *,
-    sender: str,
     recipients: Iterable[str],
     subject: str,
     html_body: str,
@@ -111,7 +110,7 @@ def send_report_bundle(
     client = GraphClient(access_token, session=session)
     draft = client.request(
         "POST",
-        f"{GRAPH_ROOT}/users/{quote(sender)}/messages",
+        f"{GRAPH_ROOT}/me/messages",
         json={
             "subject": subject,
             "body": {"contentType": "HTML", "content": html_body},
@@ -120,17 +119,16 @@ def send_report_bundle(
     ).json()
     message_id = draft["id"]
     for attachment in attachments:
-        _attach(client, sender, message_id, Path(attachment))
-    client.request("POST", f"{GRAPH_ROOT}/users/{quote(sender)}/messages/{message_id}/send")
+        _attach(client, message_id, Path(attachment))
+    client.request("POST", f"{GRAPH_ROOT}/me/messages/{message_id}/send")
     return message_id
 
 
 def send_from_manifest(manifest_path: Path) -> str:
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     fixture = manifest["fixture"]
-    sender = os.environ["MAIL_SENDER"]
     recipients = [value for value in os.environ["MAIL_RECIPIENT"].replace(";", ",").split(",") if value]
-    token = os.environ["GRAPH_ACCESS_TOKEN"]
+    token = delegated_access_token()
     score = f"{fixture['home_goals']}-{fixture['away_goals']}"
     subject = (
         f"Post-match reports | {fixture['home_team']} {score} "
@@ -144,7 +142,6 @@ def send_from_manifest(manifest_path: Path) -> str:
     )
     attachments = [Path(item["path"]) for item in manifest["reports"]]
     return send_report_bundle(
-        sender=sender,
         recipients=recipients,
         subject=subject,
         html_body=body,

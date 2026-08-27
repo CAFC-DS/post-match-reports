@@ -14,15 +14,15 @@ Set these repository/environment variables:
 
 - `AUTOMATION_START_DATE`: first fixture date eligible for automatic delivery.
 - `CAFC_TEAM_NAME`: `Charlton Athletic`.
-- `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`: Entra workload identity.
-- `MAIL_SENDER`: shared analytics mailbox address.
+- `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`: delegated Entra application.
 - `MAIL_RECIPIENT`: Microsoft 365 distribution-list address.
 - `ALERT_RECIPIENT`: operational owner (reserved for failure notifications).
 
-The Entra application uses a GitHub federated credential scoped to this
-repository's `production` environment. It needs Microsoft Graph application
-permissions `Mail.Send` and `Mail.ReadWrite`, with Exchange application RBAC
-restricting it to `MAIL_SENDER`.
+The Entra application uses delegated `Mail.Send`, `Mail.ReadWrite`, and
+`offline_access` permissions and sends as the signed-in CAFC user. Enable public
+client flows, then run `scripts/authorize_graph_delegated.py` once to store the
+MSAL cache as the `MSAL_TOKEN_CACHE` GitHub secret. Microsoft or CAFC policy may
+periodically require the user to repeat this sign-in.
 
 ## Operating model
 

@@ -37,7 +37,6 @@ def test_graph_mail_creates_draft_attaches_and_sends(tmp_path):
     session = Session()
 
     message_id = send_report_bundle(
-        sender="analytics@example.com",
         recipients=["list@example.com"],
         subject="Reports",
         html_body="<p>Ready</p>",
@@ -59,7 +58,6 @@ def test_large_attachment_uses_upload_session(tmp_path):
     session = Session()
 
     send_report_bundle(
-        sender="analytics@example.com",
         recipients=["list@example.com"],
         subject="Reports",
         html_body="Ready",
