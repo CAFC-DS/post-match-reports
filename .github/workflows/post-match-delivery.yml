@@ -1,4 +1,4 @@
-name: Generate and deliver post-match reports
+name: Generate post-match report bundle
 
 on:
   workflow_dispatch:
@@ -11,14 +11,10 @@ on:
         description: "Optional explicit DVMS/Opta match ID"
         required: false
         type: string
-      send_email:
-        description: "Email and publish the bundle"
+      archive_release:
+        description: "Publish the generated PDFs as a private release"
         default: false
         type: boolean
-      test_recipient:
-        description: "Optional recipient override for a test send"
-        required: false
-        type: string
   schedule:
     # The gate below selects 10:00, 12:00, 14:00, 16:00 and 18:00 London
     # time from this union of GMT/BST UTC hours.
@@ -30,7 +26,6 @@ concurrency:
 
 permissions:
   contents: write
-  issues: write
 
 jobs:
   reports:
@@ -153,20 +148,6 @@ jobs:
             echo "draft=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Flag interrupted delivery
-        if: steps.release.outputs.draft == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: match-${{ steps.fixture.outputs.impect_id }}
-        run: |
-          title="Delivery blocked: $TAG has a draft release"
-          if [ -z "$(gh issue list --state open --search "$title in:title" --json number --jq '.[0].number // empty')" ]; then
-            gh issue create --title "$title" --body \
-              "Check the shared mailbox Sent Items, then publish or delete the draft release before a deliberate rerun."
-          fi
-          echo "$title" >&2
-          exit 1
-
       - name: Generate complete bundle
         if: steps.fixture.outputs.ready == 'true' && steps.release.outputs.exists == 'false'
         env:
@@ -186,39 +167,15 @@ jobs:
           path: dist/${{ steps.fixture.outputs.impect_id }}/
           retention-days: 30
 
-      - name: Create draft archive release
+      - name: Publish private report archive
         if: >-
           steps.fixture.outputs.ready == 'true' &&
           steps.release.outputs.exists == 'false' &&
-          (github.event_name == 'schedule' || inputs.send_email)
+          (github.event_name == 'schedule' || inputs.archive_release)
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: match-${{ steps.fixture.outputs.impect_id }}
         run: |
           gh release create "$TAG" dist/${{ steps.fixture.outputs.impect_id }}/* \
-            --draft --title "Post-match reports $TAG" \
-            --notes "delivery_status: ready"
-
-      - name: Email distribution list
-        if: >-
-          steps.fixture.outputs.ready == 'true' &&
-          steps.release.outputs.exists == 'false' &&
-          (github.event_name == 'schedule' || inputs.send_email)
-        env:
-          MAIL_RECIPIENT: ${{ inputs.test_recipient || vars.MAIL_RECIPIENT }}
-          AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
-          AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
-          MSAL_TOKEN_CACHE: ${{ secrets.MSAL_TOKEN_CACHE }}
-        run: python -m post_match_reports.graph_mail "dist/${{ steps.fixture.outputs.impect_id }}/manifest.json"
-
-      - name: Publish delivered archive
-        if: >-
-          steps.fixture.outputs.ready == 'true' &&
-          steps.release.outputs.exists == 'false' &&
-          (github.event_name == 'schedule' || inputs.send_email)
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: match-${{ steps.fixture.outputs.impect_id }}
-        run: |
-          gh release edit "$TAG" --draft=false \
-            --notes "delivery_status: sent\ndelivered_at_utc: $(date -u +%FT%TZ)"
+            --title "Post-match reports $TAG" \
+            --notes "delivery_mode: manual_email\ngenerated_at_utc: $(date -u +%FT%TZ)"
