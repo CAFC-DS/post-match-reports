@@ -13,7 +13,7 @@ def test_west_ham_golden_is_the_expected_report():
     reader = PdfReader(GOLDEN)
     assert len(reader.pages) == 16
     assert all(float(page.mediabox.width) > float(page.mediabox.height) for page in reader.pages)
-    text = " ".join((page.extract_text() or "") for page in reader.pages)
+    text = " ".join(" ".join((page.extract_text() or "").split()) for page in reader.pages)
     assert "West Ham United 1 - 2" in text
     assert "Charlton Athletic" in text
     assert "22/08/2026" in text
