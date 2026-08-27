@@ -151,7 +151,8 @@ jobs:
       - name: Generate complete bundle
         if: steps.fixture.outputs.ready == 'true' && steps.release.outputs.exists == 'false'
         env:
-          CHROME_BIN: ${{ steps.chrome.outputs.chrome-path }}
+          CHROME_BIN: ${{ github.workspace }}/scripts/chrome_ci.sh
+          REAL_CHROME_BIN: ${{ steps.chrome.outputs.chrome-path }}
         run: |
           python -m post_match_reports generate \
             --impect-match-id "${{ steps.fixture.outputs.impect_id }}" \
