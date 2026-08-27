@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import datetime as dt
+import gc
 import io
 import os
 import shutil
@@ -1031,6 +1032,11 @@ def render_report(impect_match_id: int, dvms_match_id: str | None, output_path: 
     context=build_context(impect_match_id,dvms_match_id)
     env=Environment(loader=FileSystemLoader(str(TEMPLATES_DIR)),autoescape=select_autoescape(["html"]),trim_blocks=True,lstrip_blocks=True)
     html=env.get_template("expanded.html.j2").render(**context)
+    # The context contains many large base64 chart images. Release it before
+    # Chromium starts so private GitHub runners do not have to hold both the
+    # plotting data and the browser in memory at the same time.
+    del context
+    gc.collect()
     output_path.parent.mkdir(parents=True,exist_ok=True)
     chrome = resolve_chrome(chrome_bin)
     print(f"Rendering with {chrome_version(chrome)} ({chrome})")
