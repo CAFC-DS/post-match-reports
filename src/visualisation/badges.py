@@ -43,6 +43,7 @@ TEAM_BADGE_FILES: dict[str, str] = {
     "Sheffield Wednesday": "Sheffield_Wednesday_badge.svg.png",
     "Stoke City": "Stoke_City_FC.svg.png",
     "Swansea City": "Swansea_City_A.F.C._logo.png",
+    "Tottenham Hotspur": "Tottenham_Hotspur.png",
     "West Bromwich Albion": "West_Bromwich_Albion.svg.png",
     "West Ham United": "West_Ham_United_FC_logo.svg.png",
     "Wolverhampton Wanderers": "Wolverhampton_Wanderers.svg.png",

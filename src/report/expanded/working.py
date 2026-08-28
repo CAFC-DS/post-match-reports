@@ -655,7 +655,82 @@ def _chance_source_stacked(chances: pd.DataFrame, charlton: str, opponent: str) 
     return _uri(fig), kpis
 
 
-def _duel_bars_by_type(duels: pd.DataFrame, charlton: str, opponent: str, duel_type: str) -> str:
+_CONTROL_ACTION_TYPES = {"LOOSE_BALL_REGAIN", "INTERCEPTION", "GK_CATCH", "RECEPTION"}
+
+
+def _post_duel_control(events: pd.DataFrame, duels: pd.DataFrame, duel_type: str,
+                       window_s: float = 5.0) -> pd.DataFrame:
+    """Attach the team that establishes control after each duel contest.
+
+    IMPECT records the contest and its headed action as adjacent events.  A
+    successful headed pass or an immediate headed shot is already a resolved
+    continuation.  Failed/neutral headers are followed for at most
+    ``window_s`` seconds, within the same period, until an explicit control
+    action appears.  Unresolved contests remain null rather than being
+    silently assigned to the official duel winner.
+    """
+    out = duels.copy()
+    out["control_team"] = pd.NA
+    out["control_resolved"] = False
+    out["team_controlled"] = pd.NA
+    contest_ids = out.loc[out["duel_type"] == duel_type, "eventId"].dropna().unique()
+    if not len(contest_ids):
+        return out
+
+    ordered = (
+        events[["eventId", "eventNumber", "periodId", "gameTimeInSec", "squadName",
+                "actionType", "action", "result"]]
+        .drop_duplicates("eventId")
+        .sort_values("eventNumber")
+    )
+    controls: dict[object, str] = {}
+    for event_id in contest_ids:
+        contest = ordered.loc[ordered["eventId"] == event_id]
+        if contest.empty:
+            continue
+        row = contest.iloc[0]
+        candidates = ordered.loc[
+            (ordered["periodId"] == row["periodId"])
+            & (ordered["eventNumber"] > row["eventNumber"])
+            & (pd.to_numeric(ordered["gameTimeInSec"], errors="coerce")
+               <= float(row["gameTimeInSec"]) + window_s)
+            & ordered["squadName"].notna()
+        ]
+        control_team: str | None = None
+        for candidate in candidates.itertuples(index=False):
+            action_type = str(candidate.actionType)
+            action = str(candidate.action)
+            result = str(candidate.result)
+            is_header = action == "HEADER"
+            if action_type == "SHOT" and is_header:
+                control_team = str(candidate.squadName)
+                break
+            if action_type == "PASS" and is_header and result == "SUCCESS":
+                control_team = str(candidate.squadName)
+                break
+            if action_type in _CONTROL_ACTION_TYPES:
+                control_team = str(candidate.squadName)
+                break
+            if action_type == "SHOT" or (
+                action_type in {"PASS", "DRIBBLE"} and result == "SUCCESS"
+            ):
+                control_team = str(candidate.squadName)
+                break
+        if control_team is not None:
+            controls[event_id] = control_team
+
+    mapped = out["eventId"].map(controls)
+    resolved = mapped.notna() & out["duel_type"].eq(duel_type)
+    out.loc[resolved, "control_team"] = mapped.loc[resolved]
+    out.loc[resolved, "control_resolved"] = True
+    out.loc[resolved, "team_controlled"] = (
+        out.loc[resolved, "squadName"] == mapped.loc[resolved]
+    ).astype(bool)
+    return out
+
+
+def _duel_bars_by_type(duels: pd.DataFrame, charlton: str, opponent: str, duel_type: str,
+                       events: pd.DataFrame | None = None) -> str:
     """Mirrored won/lost duel bars, top-5-by-involvement, one panel per team
     -- the reference's page 13 layout (confirmed against the actual PDF).
     The previous template rendered the *same* single-team chart twice.
@@ -664,6 +739,9 @@ def _duel_bars_by_type(duels: pd.DataFrame, charlton: str, opponent: str, duel_t
     *loser* of a duel is only recorded on a second entry in that event's own
     KPI array, keyed by the loser's own playerId (see that function's
     docstring)."""
+    has_control = events is not None
+    if has_control:
+        duels = _post_duel_control(events, duels, duel_type)
     d = duels.loc[duels["duel_type"] == duel_type]
 
     def top5(team: str) -> pd.DataFrame:
@@ -674,6 +752,20 @@ def _duel_bars_by_type(duels: pd.DataFrame, charlton: str, opponent: str, duel_t
             if c not in agg: agg[c] = 0
         agg["surname"] = [str(n).split()[-1] for n in agg.index]
         agg["involvement"] = agg["won"] + agg["lost"]
+        if has_control:
+            for outcome, prefix in (("WON", "won"), ("LOST", "lost")):
+                outcome_rows = t.loc[t["outcome"] == outcome]
+                controlled = outcome_rows.loc[
+                    outcome_rows["team_controlled"].eq(True).fillna(False)  # noqa: E712
+                ].groupby("playerName").size()
+                not_controlled = outcome_rows.loc[
+                    outcome_rows["team_controlled"].eq(False).fillna(False)  # noqa: E712
+                ].groupby("playerName").size()
+                agg[f"{prefix}_controlled"] = controlled.reindex(agg.index, fill_value=0)
+                agg[f"{prefix}_not_controlled"] = not_controlled.reindex(agg.index, fill_value=0)
+                agg[f"{prefix}_unknown"] = (
+                    agg[prefix] - agg[f"{prefix}_controlled"] - agg[f"{prefix}_not_controlled"]
+                )
         return agg.loc[agg["involvement"] > 0].sort_values("involvement", ascending=False).head(5)
 
     c, o = top5(charlton), top5(opponent)
@@ -688,24 +780,65 @@ def _duel_bars_by_type(duels: pd.DataFrame, charlton: str, opponent: str, duel_t
     for ax, team, frame in zip(axes, (charlton, opponent), (c, o)):
         ax.set_facecolor(palette.PAPER)
         y = np.arange(len(frame))[::-1] * 1.3
-        ax.barh(y, frame["won"], color=palette.SUCCESS_GREEN, alpha=0.9, zorder=2, height=0.9)
-        ax.barh(y, -frame["lost"], color=palette.FAIL_REDGREY, alpha=0.9, zorder=2, height=0.9)
-        for yi, w, l in zip(y, frame["won"], frame["lost"]):
-            if l: ax.text(-l - x_max * 0.035, yi, f"{int(l)}", ha="right", va="center", fontsize=11, fontweight="bold", color=palette.FAIL_REDGREY)
-            if w: ax.text(w + x_max * 0.035, yi, f"{int(w)}", ha="left", va="center", fontsize=11, fontweight="bold", color=palette.SUCCESS_GREEN)
+        if has_control:
+            ax.barh(y, frame["won_controlled"], color=palette.SUCCESS_GREEN,
+                    alpha=0.95, zorder=2, height=0.9)
+            ax.barh(y, frame["won_not_controlled"], left=frame["won_controlled"],
+                    color=palette.SUCCESS_GREEN, alpha=0.35, zorder=2, height=0.9)
+            ax.barh(y, -frame["lost_not_controlled"], color=palette.FAIL_REDGREY,
+                    alpha=0.95, zorder=2, height=0.9)
+            ax.barh(y, -frame["lost_controlled"], left=-frame["lost_not_controlled"],
+                    color=palette.FAIL_REDGREY, alpha=0.35, zorder=2, height=0.9)
+            for yi, row in zip(y, frame.itertuples()):
+                segments = (
+                    (row.won_controlled / 2, row.won_controlled, "white"),
+                    (row.won_controlled + row.won_not_controlled / 2,
+                     row.won_not_controlled, palette.INK),
+                    (-row.lost_not_controlled / 2, row.lost_not_controlled, "white"),
+                    (-(row.lost_not_controlled + row.lost_controlled / 2),
+                     row.lost_controlled, palette.INK),
+                )
+                for x, value, color in segments:
+                    if value:
+                        ax.text(x, yi, str(int(value)), ha="center", va="center",
+                                fontsize=10, fontweight="bold", color=color, zorder=4)
+        else:
+            ax.barh(y, frame["won"], color=palette.SUCCESS_GREEN, alpha=0.9, zorder=2, height=0.9)
+            ax.barh(y, -frame["lost"], color=palette.FAIL_REDGREY, alpha=0.9, zorder=2, height=0.9)
+        if not has_control:
+            for yi, w, l in zip(y, frame["won"], frame["lost"]):
+                if l: ax.text(-l - x_max * 0.035, yi, f"{int(l)}", ha="right", va="center", fontsize=11, fontweight="bold", color=palette.FAIL_REDGREY)
+                if w: ax.text(w + x_max * 0.035, yi, f"{int(w)}", ha="left", va="center", fontsize=11, fontweight="bold", color=palette.SUCCESS_GREEN)
         ax.set_yticks(y); ax.set_yticklabels(frame["surname"], fontsize=12, fontweight="bold")
         ax.set_xlim(-x_max, x_max)
         ticks = [-15, -10, -5, 0, 5, 10, 15]
         ax.set_xticks(ticks); ax.set_xticklabels([str(abs(t)) for t in ticks], fontsize=9, color=palette.MUTED)
         ax.grid(axis="x", color=palette.HAIR_SOFT, lw=0.5, zorder=1)
         ax.axvline(0, color=palette.INK, lw=1, zorder=3)
-        ax.set_title(team, fontsize=13, fontweight="bold", pad=10,
+        title = team
+        if has_control:
+            team_rows = d.loc[d["squadName"] == team]
+            resolved = team_rows.loc[team_rows["control_resolved"]]
+            controlled = int((resolved["team_controlled"] == True).sum())  # noqa: E712
+            rate = controlled / len(resolved) * 100 if len(resolved) else 0.0
+            title += f"\nPost-duel control: {controlled}/{len(resolved)} ({rate:.0f}%)"
+        ax.set_title(title, fontsize=13, fontweight="bold", pad=10,
                      color=palette.CHARLTON_RED if team == charlton else palette.OPPONENT_GREY)
         ax.spines[:].set_visible(False)
         ax.tick_params(length=0)
     from matplotlib.patches import Patch
-    handles = [Patch(color=palette.SUCCESS_GREEN, label="Won"), Patch(color=palette.FAIL_REDGREY, label="Lost")]
-    fig.legend(handles=handles, loc="lower center", ncol=2, frameon=False, fontsize=10,
+    if has_control:
+        handles = [
+            Patch(color=palette.SUCCESS_GREEN, alpha=0.95, label="Won, control kept"),
+            Patch(color=palette.SUCCESS_GREEN, alpha=0.35, label="Won, control lost"),
+            Patch(color=palette.FAIL_REDGREY, alpha=0.35, label="Lost, control recovered"),
+            Patch(color=palette.FAIL_REDGREY, alpha=0.95, label="Lost, control conceded"),
+        ]
+        columns = 4
+    else:
+        handles = [Patch(color=palette.SUCCESS_GREEN, label="Won"), Patch(color=palette.FAIL_REDGREY, label="Lost")]
+        columns = 2
+    fig.legend(handles=handles, loc="lower center", ncol=columns, frameon=False, fontsize=10,
                bbox_to_anchor=(0.5, 0.005))
     return _uri_fixed(fig)
 
@@ -994,6 +1127,7 @@ def build_context(impect_match_id: int, dvms_match_id: str | None = None) -> dic
     transition_img,transition_kpis=_transition_response_map(events,subject,opponent)
     context.update({
         "generated_date":dt.date.today().strftime("%d %B %Y"),
+        "report_page_count":16 if context["tracked_shapes"] else 15,
         "subject":subject,"opponent":opponent,"team_order":teams,"side_by_team":side_by_team,
         "network":networks,"network_scale_threat":network_scale_threat,
         "stat_rows_expanded":stat_rows_expanded,
@@ -1012,8 +1146,10 @@ def build_context(impect_match_id: int, dvms_match_id: str | None = None) -> dic
         "regain_img":regain_img,"regain_kpis":regain_kpis,
         "second_ball_img":second_ball_img,"second_ball_kpis":second_ball_kpis,
         "transition_img":transition_img,"transition_kpis":transition_kpis,
-        "duel_aerial_bars_img":_duel_bars_by_type(duel_involvement,subject,opponent,"AERIAL"),
-        "duel_ground_bars_img":_duel_bars_by_type(duel_involvement,subject,opponent,"GROUND"),
+        "duel_aerial_bars_img":_duel_bars_by_type(
+            duel_involvement,subject,opponent,"AERIAL",events=events),
+        "duel_ground_bars_img":_duel_bars_by_type(
+            duel_involvement,subject,opponent,"GROUND",events=events),
         "recovery_player_img":_bars(recovery_top6.index.tolist(),recovery_top6.values.tolist(),palette.CHARLTON_RED),
         "event_counts":{"pressures":pressure_kpis["pressure_n"],"regains":regain_kpis["n"],"second_balls":second_ball_kpis["n"],"losses":transition_kpis["high_losses_n"]},
         "big_chances":{

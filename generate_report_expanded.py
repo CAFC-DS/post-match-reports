@@ -17,11 +17,18 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--impect-match-id", type=int, required=True)
     parser.add_argument("--dvms-match-id", help="optional DVMS/Opta match-id override")
+    parser.add_argument(
+        "--force-impect-only",
+        action="store_true",
+        help="skip DVMS discovery and render the 15-page IMPECT fallback",
+    )
     parser.add_argument("--output-dir", type=Path, default=Path("outputs"))
     parser.add_argument("--chrome-bin", type=Path,
                         help="Chrome/Chromium executable (or set CHROME_BIN)")
     parser.add_argument("--yes", action="store_true", help="retained for CLI compatibility")
     args = parser.parse_args()
+    if args.force_impect_only and args.dvms_match_id:
+        parser.error("--force-impect-only cannot be combined with --dvms-match-id")
 
     from src.dvms.loaders.fixtures import resolve_fixture, resolve_fixture_for_match
     from src.dvms.preprocess import is_preprocessed, preprocess_fixture
@@ -32,19 +39,22 @@ def main() -> int:
     try:
         events = impect_cafcdb_source.load_match_events(args.impect_match_id)
         meta = metrics.match_meta(events)
-        fixture = (
-            resolve_fixture(args.dvms_match_id)
-            if args.dvms_match_id
-            else resolve_fixture_for_match(meta.home_team, meta.away_team, meta.kickoff)
-        )
-        if fixture is None:
-            raise LookupError("No matching DVMS fixture was found")
-        _assert_same_fixture(meta, fixture)
+        fixture = None
+        if not args.force_impect_only:
+            fixture = (
+                resolve_fixture(args.dvms_match_id)
+                if args.dvms_match_id
+                else resolve_fixture_for_match(meta.home_team, meta.away_team, meta.kickoff)
+            )
+            if fixture is not None:
+                _assert_same_fixture(meta, fixture)
     except (FixtureMismatchError, LookupError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
-    if not is_preprocessed(fixture.opta_match_id):
+    if fixture is None:
+        print("DVMS unavailable or disabled; generating the 15-page IMPECT fallback.")
+    elif not is_preprocessed(fixture.opta_match_id):
         preprocess_fixture(fixture.fixture_id, fixture.opta_match_id)
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
@@ -58,7 +68,7 @@ def main() -> int:
     final_path = args.output_dir / final_name
     render_report(
         args.impect_match_id,
-        fixture.opta_match_id,
+        fixture.opta_match_id if fixture else None,
         final_path,
         chrome_bin=args.chrome_bin,
     )
