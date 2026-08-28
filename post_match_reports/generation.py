@@ -4,6 +4,7 @@ import datetime as dt
 import hashlib
 import json
 import os
+import resource
 import subprocess
 import sys
 from pathlib import Path
@@ -21,6 +22,25 @@ from src.report.render_combined import render_report as render_board
 ROOT = Path(__file__).resolve().parents[1]
 SET_PIECE_ROOT = ROOT / "reports" / "set_piece"
 EXPECTED_PAGES = {"expanded": 16, "board": 1, "set_piece": 1}
+
+
+def _log_stage(label: str) -> None:
+    """Print elapsed-stage progress plus RSS/available-RAM, to help tell a
+    silent OOM kill apart from any other cause if a stage never completes."""
+    rss_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
+    mem_available = "n/a"
+    try:
+        with open("/proc/meminfo") as handle:
+            for line in handle:
+                if line.startswith("MemAvailable:"):
+                    mem_available = f"{int(line.split()[1]) / 1024:.0f}MB"
+                    break
+    except OSError:
+        pass
+    print(
+        f"[generate] {label} (rss={rss_mb:.0f}MB, mem_available={mem_available})",
+        flush=True,
+    )
 
 
 def _sha256(path: Path) -> str:
@@ -66,15 +86,15 @@ def generate_bundle(
     for stale_pdf in output_dir.glob("*.pdf"):
         stale_pdf.unlink()
 
-    print(f"[generate] loading Impect events for match {impect_match_id}", flush=True)
+    _log_stage(f"loading Impect events for match {impect_match_id}")
     events = impect_cafcdb_source.load_match_events(impect_match_id)
     meta = metrics.match_meta(events)
-    print(f"[generate] resolving DVMS fixture for match {dvms_match_id}", flush=True)
+    _log_stage(f"resolving DVMS fixture for match {dvms_match_id}")
     fixture = resolve_fixture(dvms_match_id)
     if not is_preprocessed(fixture.opta_match_id):
-        print(f"[generate] preprocessing DVMS tracking data for {fixture.opta_match_id}", flush=True)
+        _log_stage(f"preprocessing DVMS tracking data for {fixture.opta_match_id}")
         preprocess_fixture(fixture.fixture_id, fixture.opta_match_id)
-        print("[generate] DVMS preprocessing complete", flush=True)
+        _log_stage("DVMS preprocessing complete")
 
     def slug(value: str) -> str:
         import re
@@ -84,16 +104,16 @@ def generate_bundle(
         f"expanded_analyst_report_{slug(meta.home_team)}_v_{slug(meta.away_team)}_"
         f"{meta.kickoff:%d-%m-%Y}.pdf"
     )
-    print("[generate] rendering expanded analyst report", flush=True)
+    _log_stage("rendering expanded analyst report")
     render_expanded(
         impect_match_id,
         fixture.opta_match_id,
         expanded_path,
         chrome_bin=chrome_bin,
     )
-    print(f"[generate] expanded report written to {expanded_path}", flush=True)
+    _log_stage(f"expanded report written to {expanded_path}")
 
-    print("[generate] rendering board report", flush=True)
+    _log_stage("rendering board report")
     board_outputs = render_board(
         impect_match_id,
         fixture.opta_match_id,
@@ -101,9 +121,9 @@ def generate_bundle(
         formats=("pdf",),
         strict_data=True,
     )
-    print(f"[generate] board report written to {board_outputs['pdf']}", flush=True)
+    _log_stage(f"board report written to {board_outputs['pdf']}")
 
-    print("[generate] rendering set-piece report", flush=True)
+    _log_stage("launching set-piece report subprocess")
     before = set(output_dir.glob("*.pdf"))
     command = [
         sys.executable,
@@ -121,13 +141,14 @@ def generate_bundle(
         [str(ROOT), environment.get("PYTHONPATH", "")]
     ).rstrip(os.pathsep)
     subprocess.run(command, cwd=SET_PIECE_ROOT, env=environment, check=True)
+    _log_stage("set-piece report subprocess returned")
     created = set(output_dir.glob("*.pdf")) - before
     set_piece = [path for path in created if path.name.endswith("set_piece_report_players.pdf")]
     if len(set_piece) != 1:
         raise RuntimeError(f"Expected one set-piece PDF, found: {sorted(map(str, set_piece))}")
-    print(f"[generate] set-piece report written to {set_piece[0]}", flush=True)
+    _log_stage(f"set-piece report written to {set_piece[0]}")
 
-    print("[generate] validating generated PDFs", flush=True)
+    _log_stage("validating generated PDFs")
     reports = [
         _validate_pdf("expanded", expanded_path, meta.home_team, meta.away_team),
         _validate_pdf("board", board_outputs["pdf"], meta.home_team, meta.away_team),
