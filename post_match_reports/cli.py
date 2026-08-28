@@ -7,7 +7,6 @@ import os
 from pathlib import Path
 
 from .discovery import discover_latest_ready
-from .generation import generate_bundle, write_manifest
 
 
 def _date(value: str) -> dt.date:
@@ -36,6 +35,13 @@ def main() -> int:
         payload = {"ready": ready is not None, "fixture": ready.to_dict() if ready else None}
         print(json.dumps(payload) if args.json else payload)
         return 0
+
+    # Imported lazily: this pulls in matplotlib/weasyprint/fitz, which
+    # `discover` never needs -- and fitz prints its own deprecation
+    # notice straight to stdout at import time, which previously
+    # corrupted `discover --json`'s output for any caller (e.g. the CI
+    # workflow) that imports this module before checking args.command.
+    from .generation import generate_bundle, write_manifest
 
     manifest = generate_bundle(
         args.impect_match_id,

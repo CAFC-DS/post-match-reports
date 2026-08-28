@@ -9,7 +9,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-import fitz
+import pymupdf as fitz
 from pypdf import PdfReader
 
 from src.dvms.loaders.fixtures import resolve_fixture

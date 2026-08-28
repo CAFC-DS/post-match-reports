@@ -168,16 +168,7 @@ jobs:
             if [ -n "$AUTOMATION_START_DATE" ]; then
               discovery_args+=(--not-before "$AUTOMATION_START_DATE")
             fi
-            set +e
-            python -u -m post_match_reports discover "${discovery_args[@]}" \
-              > "$RUNNER_TEMP/discovery.json" 2> "$RUNNER_TEMP/discovery.err"
-            discover_status=$?
-            set -e
-            echo "discover exit status: $discover_status" >&2
-            echo "--- stdout (byte dump) ---" >&2
-            od -c "$RUNNER_TEMP/discovery.json" >&2 || true
-            echo "--- stderr ---" >&2
-            cat "$RUNNER_TEMP/discovery.err" >&2
+            python -u -m post_match_reports discover "${discovery_args[@]}" > "$RUNNER_TEMP/discovery.json"
             python - "$RUNNER_TEMP/discovery.json" "$GITHUB_OUTPUT" <<'PY'
           import json, sys
           data = json.load(open(sys.argv[1]))
