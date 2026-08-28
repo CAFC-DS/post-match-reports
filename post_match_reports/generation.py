@@ -127,6 +127,8 @@ def generate_bundle(
     before = set(output_dir.glob("*.pdf"))
     command = [
         sys.executable,
+        "-u",  # unbuffered stdout/stderr: a hard crash (segfault) would
+               # otherwise drop whatever the child had already buffered
         "set_piece_report/run.py",
         "--match-id", str(impect_match_id),
         "--output-dir", str(output_dir),
@@ -140,7 +142,20 @@ def generate_bundle(
     environment["PYTHONPATH"] = os.pathsep.join(
         [str(ROOT), environment.get("PYTHONPATH", "")]
     ).rstrip(os.pathsep)
-    subprocess.run(command, cwd=SET_PIECE_ROOT, env=environment, check=True)
+    # Two prior runs died here with zero output and no traceback -- consistent
+    # with a native (C-extension) crash whose exit is a signal, not a Python
+    # exception. faulthandler dumps a C-level traceback on such crashes, and
+    # a bounded timeout turns "silently hangs forever" into a clear error
+    # instead of an ambiguous dead step.
+    environment["PYTHONFAULTHANDLER"] = "1"
+    try:
+        subprocess.run(command, cwd=SET_PIECE_ROOT, env=environment, check=True, timeout=1200)
+    except subprocess.TimeoutExpired:
+        _log_stage("set-piece report subprocess timed out after 1200s")
+        raise
+    except subprocess.CalledProcessError as exc:
+        _log_stage(f"set-piece report subprocess exited with {exc.returncode}")
+        raise
     _log_stage("set-piece report subprocess returned")
     created = set(output_dir.glob("*.pdf")) - before
     set_piece = [path for path in created if path.name.endswith("set_piece_report_players.pdf")]
