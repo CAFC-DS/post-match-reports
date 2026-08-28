@@ -16,9 +16,12 @@ on:
         default: false
         type: boolean
   schedule:
-    # The gate below selects 10:00, 12:00, 14:00, 16:00 and 18:00 London
-    # time from this union of GMT/BST UTC hours.
-    - cron: "0 9-18 * * *"
+    # Sunday (post-Saturday match), Wednesday and Thursday (post-Tuesday or
+    # -Wednesday midweek match) -- covers both midweek slots since which one
+    # a fixture lands on varies. Fires at both 11:00 and 12:00 UTC; the gate
+    # below picks whichever one is noon London time (GMT/BST shifts by an
+    # hour), so it still runs exactly once per day.
+    - cron: "0 11-12 * * 0,3,4"
 
 concurrency:
   group: post-match-delivery
@@ -51,7 +54,7 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
-          elif [[ " 10 12 14 16 18 " == *" $(TZ=Europe/London date +%H) "* ]]; then
+          elif [ "$(TZ=Europe/London date +%H)" = "12" ]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
