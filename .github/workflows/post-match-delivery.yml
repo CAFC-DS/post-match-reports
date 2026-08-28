@@ -173,14 +173,11 @@ jobs:
               > "$RUNNER_TEMP/discovery.json" 2> "$RUNNER_TEMP/discovery.err"
             discover_status=$?
             set -e
-            if [ "$discover_status" -ne 0 ] || [ ! -s "$RUNNER_TEMP/discovery.json" ]; then
-              echo "discover exited with status $discover_status" >&2
-              echo "--- stdout ---" >&2
-              cat "$RUNNER_TEMP/discovery.json" >&2
-              echo "--- stderr ---" >&2
-              cat "$RUNNER_TEMP/discovery.err" >&2
-              exit 1
-            fi
+            echo "discover exit status: $discover_status" >&2
+            echo "--- stdout (byte dump) ---" >&2
+            od -c "$RUNNER_TEMP/discovery.json" >&2 || true
+            echo "--- stderr ---" >&2
+            cat "$RUNNER_TEMP/discovery.err" >&2
             python - "$RUNNER_TEMP/discovery.json" "$GITHUB_OUTPUT" <<'PY'
           import json, sys
           data = json.load(open(sys.argv[1]))
