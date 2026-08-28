@@ -8,11 +8,30 @@ season report does.
 
 from __future__ import annotations
 
+import resource
 import sys
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
+
+
+def _log_mem(label: str) -> None:
+    """Stage/RSS/available-RAM checkpoint -- mirrors post_match_reports.generation
+    to help tell an OOM kill apart from any other silent crash in this
+    subprocess (weasyprint/pango PDF rendering is a plausible memory spike
+    point since it lays out several embedded matplotlib chart images at once)."""
+    rss_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
+    mem_available = "n/a"
+    try:
+        with open("/proc/meminfo") as handle:
+            for line in handle:
+                if line.startswith("MemAvailable:"):
+                    mem_available = f"{int(line.split()[1]) / 1024:.0f}MB"
+                    break
+    except OSError:
+        pass
+    print(f"[set_piece] {label} (rss={rss_mb:.0f}MB, mem_available={mem_available})", flush=True)
 
 # Ensure the parent project (src.*) and this package are importable when run as
 # a script from anywhere.
@@ -350,10 +369,12 @@ def build_report(
     loaded into staging -- see ``impect_cafcdb_source.py`` for the set-piece
     field derivation this path relies on).
     """
+    _log_mem(f"build_report start ({corner_style}/{theme}/{tables_style})")
     thm = get_theme(theme)
     ctx = (load_match_context_cafcdb(match_id) if source == "cafcdb"
            else load_match_context(match_id, refresh=refresh))
     report_data = build_report_data(ctx)
+    _log_mem("match context + report data loaded")
 
     zonal = corner_style == "zones"
     players = tables_style == "players"
@@ -369,6 +390,7 @@ def build_report(
             "throw_img": pitch.throw_in_overview(throw_in_deliveries(ctx, team), thm),
             "corner_type_counts": report_data.corner_type_counts.get(team, {}),
         }
+        _log_mem(f"pitch images rendered for {side} ({team})")
 
     home_bar, away_bar = resolve_bar_colors(ctx.home_team, ctx.away_team, thm)
     md = None
@@ -412,6 +434,7 @@ def build_report(
         lstrip_blocks=True,
     )
     html = env.get_template("set_piece_report.html.j2").render(**context)
+    _log_mem("HTML template rendered")
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -433,6 +456,8 @@ def build_report(
         from weasyprint import HTML
 
         pdf_path = output_dir / f"{slug}.pdf"
+        _log_mem("starting weasyprint PDF render")
         HTML(string=html, base_url=str(PROJECT_ROOT)).write_pdf(str(pdf_path))
+        _log_mem("weasyprint PDF render complete")
         outputs["pdf"] = pdf_path
     return outputs
