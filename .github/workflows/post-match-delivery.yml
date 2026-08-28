@@ -88,6 +88,20 @@ jobs:
           restore-keys: |
             dvms-${{ runner.os }}-
 
+      - name: Restore set-piece league events cache
+        if: steps.gate.outputs.run == 'true'
+        uses: actions/cache@v4
+        with:
+          # Without this, every run does a full-season "select *" from
+          # Snowflake with no local extract present (the parquet cache
+          # QueryRunner writes to is gitignored, dev-machine only) -- a
+          # season-scale fetch_pandas_all() this repeatedly caused the
+          # set-piece subprocess to die silently (OOM) with no traceback.
+          path: reports/set_piece/data/processed
+          key: set-piece-league-events-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            set-piece-league-events-${{ runner.os }}-
+
       - name: Write Snowflake private key
         if: steps.gate.outputs.run == 'true'
         env:
@@ -169,6 +183,12 @@ jobs:
         env:
           CHROME_BIN: ${{ github.workspace }}/scripts/chrome_ci.sh
           REAL_CHROME_BIN: ${{ steps.chrome.outputs.chrome-path }}
+
+      - name: Post-mortem on generate failure
+        if: always() && steps.fixture.outputs.ready == 'true' && steps.release.outputs.exists == 'false'
+        run: |
+          (sudo dmesg 2>/dev/null || dmesg 2>/dev/null || echo "dmesg unavailable") | tail -80
+          free -m
 
       - name: Upload diagnostic bundle
         if: steps.fixture.outputs.ready == 'true' && steps.release.outputs.exists == 'false'
