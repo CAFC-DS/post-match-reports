@@ -150,15 +150,25 @@ jobs:
 
       - name: Generate complete bundle
         if: steps.fixture.outputs.ready == 'true' && steps.release.outputs.exists == 'false'
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 60
+          max_attempts: 2
+          retry_wait_seconds: 30
+          # GitHub-hosted runners occasionally get torn down mid-job
+          # ("The runner has received a shutdown signal" / operation
+          # canceled) with no relation to this command's own logic; one
+          # retry absorbs that infra flakiness instead of requiring a
+          # manual re-run.
+          command: |
+            python -m post_match_reports generate \
+              --impect-match-id "${{ steps.fixture.outputs.impect_id }}" \
+              --dvms-match-id "${{ steps.fixture.outputs.dvms_id }}" \
+              --output-dir "dist/${{ steps.fixture.outputs.impect_id }}" \
+              --manifest "dist/${{ steps.fixture.outputs.impect_id }}/manifest.json"
         env:
           CHROME_BIN: ${{ github.workspace }}/scripts/chrome_ci.sh
           REAL_CHROME_BIN: ${{ steps.chrome.outputs.chrome-path }}
-        run: |
-          python -m post_match_reports generate \
-            --impect-match-id "${{ steps.fixture.outputs.impect_id }}" \
-            --dvms-match-id "${{ steps.fixture.outputs.dvms_id }}" \
-            --output-dir "dist/${{ steps.fixture.outputs.impect_id }}" \
-            --manifest "dist/${{ steps.fixture.outputs.impect_id }}/manifest.json"
 
       - name: Upload diagnostic bundle
         if: steps.fixture.outputs.ready == 'true' && steps.release.outputs.exists == 'false'

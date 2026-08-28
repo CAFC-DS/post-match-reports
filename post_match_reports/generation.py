@@ -63,12 +63,18 @@ def generate_bundle(
 ) -> dict:
     output_dir = output_dir.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
+    for stale_pdf in output_dir.glob("*.pdf"):
+        stale_pdf.unlink()
 
+    print(f"[generate] loading Impect events for match {impect_match_id}", flush=True)
     events = impect_cafcdb_source.load_match_events(impect_match_id)
     meta = metrics.match_meta(events)
+    print(f"[generate] resolving DVMS fixture for match {dvms_match_id}", flush=True)
     fixture = resolve_fixture(dvms_match_id)
     if not is_preprocessed(fixture.opta_match_id):
+        print(f"[generate] preprocessing DVMS tracking data for {fixture.opta_match_id}", flush=True)
         preprocess_fixture(fixture.fixture_id, fixture.opta_match_id)
+        print("[generate] DVMS preprocessing complete", flush=True)
 
     def slug(value: str) -> str:
         import re
@@ -78,13 +84,16 @@ def generate_bundle(
         f"expanded_analyst_report_{slug(meta.home_team)}_v_{slug(meta.away_team)}_"
         f"{meta.kickoff:%d-%m-%Y}.pdf"
     )
+    print("[generate] rendering expanded analyst report", flush=True)
     render_expanded(
         impect_match_id,
         fixture.opta_match_id,
         expanded_path,
         chrome_bin=chrome_bin,
     )
+    print(f"[generate] expanded report written to {expanded_path}", flush=True)
 
+    print("[generate] rendering board report", flush=True)
     board_outputs = render_board(
         impect_match_id,
         fixture.opta_match_id,
@@ -92,7 +101,9 @@ def generate_bundle(
         formats=("pdf",),
         strict_data=True,
     )
+    print(f"[generate] board report written to {board_outputs['pdf']}", flush=True)
 
+    print("[generate] rendering set-piece report", flush=True)
     before = set(output_dir.glob("*.pdf"))
     command = [
         sys.executable,
@@ -114,7 +125,9 @@ def generate_bundle(
     set_piece = [path for path in created if path.name.endswith("set_piece_report_players.pdf")]
     if len(set_piece) != 1:
         raise RuntimeError(f"Expected one set-piece PDF, found: {sorted(map(str, set_piece))}")
+    print(f"[generate] set-piece report written to {set_piece[0]}", flush=True)
 
+    print("[generate] validating generated PDFs", flush=True)
     reports = [
         _validate_pdf("expanded", expanded_path, meta.home_team, meta.away_team),
         _validate_pdf("board", board_outputs["pdf"], meta.home_team, meta.away_team),
