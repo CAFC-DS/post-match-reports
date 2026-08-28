@@ -111,6 +111,41 @@ jobs:
           chmod 600 "$RUNNER_TEMP/snowflake_key.pem"
           echo "SNOWFLAKE_PRIVATE_KEY_PATH=$RUNNER_TEMP/snowflake_key.pem" >> "$GITHUB_ENV"
 
+      - name: Warm set-piece league events cache
+        # A cold cache means the set-piece step's first Snowflake call is an
+        # uncached full-season "select *" (the exact query that OOM-killed
+        # the set-piece subprocess with no traceback -- see generation.py's
+        # _log_mem history). Doing that pull here instead means: (a) it runs
+        # alone, before Chromium/DVMS have used any of the runner's ~7GB, and
+        # (b) a successful pull is saved immediately below, rather than
+        # depending on the rest of this job -- including the flaky
+        # Chromium/weasyprint steps -- completing so the automatic post-job
+        # cache save can run.
+        if: steps.gate.outputs.run == 'true'
+        id: warm_cache
+        working-directory: reports/set_piece
+        run: |
+          if [ -f data/processed/league_events.parquet ]; then
+          echo "League events cache already warm."
+          echo "warmed=false" >> "$GITHUB_OUTPUT"
+          exit 0
+          fi
+          python -u - <<'PY'
+          import sys
+          sys.path.insert(0, ".")
+          from src.db.query_runner import QueryRunner
+          QueryRunner().load_league_events()
+          print("League events pulled and cached.")
+          PY
+          echo "warmed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Save set-piece league events cache
+        if: steps.gate.outputs.run == 'true' && steps.warm_cache.outputs.warmed == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: reports/set_piece/data/processed
+          key: set-piece-league-events-${{ runner.os }}-${{ github.run_id }}
+
       - name: Resolve fixture
         if: steps.gate.outputs.run == 'true'
         id: fixture
