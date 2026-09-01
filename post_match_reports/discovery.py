@@ -66,6 +66,25 @@ def _candidate_rows(team: str, env_path: str = ".env") -> pd.DataFrame:
     return pd.DataFrame(rows, columns=columns)
 
 
+def _dedupe_fixtures(fixtures: pd.DataFrame) -> pd.DataFrame:
+    """Collapse DVMS_RAW.FIXTURES to one row per FIXTURE_ID.
+
+    The upstream extractor inserts rather than upserts, so a fixture can
+    carry two rows -- a pre-match one with null scores and a post-match one
+    with the final score. Left as-is, ``_matching_dvms``'s ``len(exact) != 1``
+    guard treats the pair as ambiguous and silently drops the fixture from
+    discovery. Prefer the scored row when both are present.
+    """
+    has_score = fixtures["HOME_SCORE"].notna() & fixtures["AWAY_SCORE"].notna()
+    ordered = fixtures.assign(_has_score=has_score).sort_values(
+        "_has_score", kind="stable"
+    )
+    deduped = ordered.drop_duplicates(subset="FIXTURE_ID", keep="last")
+    return deduped.drop(columns="_has_score").sort_values(
+        "MATCH_DATE", ascending=False
+    )
+
+
 def _matching_dvms(row: pd.Series, fixtures: pd.DataFrame) -> FixtureRef | None:
     target_date = pd.Timestamp(row["KICKOFF_UTC"]).date()
     same_date = fixtures.loc[pd.to_datetime(fixtures["MATCH_DATE"]).dt.date == target_date]
@@ -124,7 +143,7 @@ def discover_latest_ready(
 ) -> ReadyFixture | None:
     """Return the newest completed fixture with every production input ready."""
     candidates = _candidate_rows(team, env_path)
-    fixtures = list_fixtures(env_path)
+    fixtures = _dedupe_fixtures(list_fixtures(env_path))
     team_key = normalize_team_name(team)
     for _, row in candidates.iterrows():
         kickoff = pd.Timestamp(row["KICKOFF_UTC"])

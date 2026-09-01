@@ -42,7 +42,14 @@ def _use_context(cur) -> None:
 
 
 def fixtures_table() -> str:
-    return f"{_db()}.DVMS_RAW.FIXTURES"
+    # DVMS_RAW.FIXTURES is append-only: a fixture gets a pre-match row (null
+    # score) and later a post-match row (final score), so it is NOT one row
+    # per FIXTURE_ID. Read the deduped staging view instead -- same columns
+    # and types, guaranteed one latest row per FIXTURE_ID. Override with
+    # DVMS_FIXTURES_RELATION to fall back to raw.
+    return os.environ.get(
+        "DVMS_FIXTURES_RELATION", f"{_db()}.DVMS_RAW_STAGING.STG_DVMS__FIXTURES"
+    )
 
 
 def assets_table() -> str:
