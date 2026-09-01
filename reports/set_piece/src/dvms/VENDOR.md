@@ -1,13 +1,16 @@
-# src/dvms — vendored DVMS (Opta + Second Spectrum) data package
+# src/dvms — DVMS (Opta + Second Spectrum) data package
 
-Canonical copy: `board-post-match-report/src/dvms/`. The sibling repos
-(`charlton-post-match-analyst`, `set-piece-report`,
-`pre-match-set-piece-report`, `dvms-sample-pack`) carry byte-identical
-copies, the same convention as `src/db/`. Edit here, run the tests
-(`pytest tests/dvms/`), then re-copy; never edit a downstream copy.
+In-repo mirror of the top-level `src/dvms/` (the source of truth — see its
+VENDOR.md). Keep this directory byte-identical to `<repo root>/src/dvms/`
+until the two trees are deduplicated; edit there, then copy here.
+
+The old external canonical (`board-post-match-report/src/dvms/`) and the
+historical sibling repos are dead — consolidated ~2026-08-18.
 
 Data formats are documented in the DVMS handover
 (`cafc-data-platform/docs/dvms-data-handover.md`); parsers are unit-tested
 against the real sample files in `~/Desktop/dvms_samples/`.
 
-Last sync: 2026-07-19.
+History: last vendor sync from the old canonical was 2026-07-19. Diverged
+2026-09-01 — `fixtures_table()` repointed to the deduped
+`CAFC_DB.DVMS_RAW_STAGING.STG_DVMS__FIXTURES` view (PR #1).
