@@ -57,6 +57,26 @@ def test_discover_waits_when_dvms_scores_or_assets_are_missing(monkeypatch):
     assert discovery.discover_latest_ready() is None
 
 
+def test_discover_tolerates_duplicate_dvms_fixture_rows(monkeypatch):
+    # DVMS_RAW.FIXTURES carries a pre-match (null score) and a post-match
+    # (final score) row for the same FIXTURE_ID -- the pair must not read as
+    # an ambiguous match and drop the fixture.
+    pre_match = _fixtures(None, None)
+    post_match = _fixtures()
+    dup = pd.concat([pre_match, post_match], ignore_index=True)
+
+    monkeypatch.setattr(discovery, "_candidate_rows", lambda *args: _candidate())
+    monkeypatch.setattr(discovery, "list_fixtures", lambda *args: dup)
+    monkeypatch.setattr(discovery, "_dvms_assets_ready", lambda *args: True)
+
+    result = discovery.discover_latest_ready(not_before=dt.date(2026, 8, 20))
+
+    assert result is not None
+    assert result.dvms_match_id == "2647272"
+    assert result.home_goals == 1
+    assert result.away_goals == 2
+
+
 def test_discover_respects_automation_start_date(monkeypatch):
     monkeypatch.setattr(discovery, "_candidate_rows", lambda *args: _candidate())
     monkeypatch.setattr(discovery, "list_fixtures", lambda *args: _fixtures())
