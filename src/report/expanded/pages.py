@@ -12,10 +12,15 @@ from typing import Any
 SECTIONS = ("overview", "in_possession", "out_of_possession", "transition")
 
 
-def _plan(tracked_shapes: bool) -> list[tuple[str, str, bool]]:
+def _plan(tracked_shapes: bool, has_team_sheet: bool) -> list[tuple[str, str, bool]]:
     """Ordered ``(key, section, is_divider)`` for the report."""
     plan: list[tuple[str, str, bool]] = [
+        ("contents", "front", True),
         ("div_overview", "overview", True),
+    ]
+    if has_team_sheet:
+        plan.append(("ov_sheet", "overview", False))
+    plan += [
         ("ov_stats", "overview", False),
         ("ov_flow", "overview", False),
         ("div_ip", "in_possession", True),
@@ -39,7 +44,7 @@ def _plan(tracked_shapes: bool) -> list[tuple[str, str, bool]]:
     return plan
 
 
-def build_page_plan(tracked_shapes: bool) -> dict[str, Any]:
+def build_page_plan(tracked_shapes: bool, has_team_sheet: bool = True) -> dict[str, Any]:
     """Number every page and label content pages ``PAGE i/n`` within their section.
 
     Returns ``{"pages": {key: {...}}, "order": [key, ...], "total": int,
@@ -47,7 +52,7 @@ def build_page_plan(tracked_shapes: bool) -> dict[str, Any]:
     ``n`` (1-based position in the report), ``section``, ``divider`` and
     ``label`` (``"DIVIDER"`` or ``"PAGE i/n"``).
     """
-    plan = _plan(tracked_shapes)
+    plan = _plan(tracked_shapes, has_team_sheet)
     content_total: dict[str, int] = {}
     for _, section, divider in plan:
         if not divider:
@@ -57,7 +62,9 @@ def build_page_plan(tracked_shapes: bool) -> dict[str, Any]:
     seen: dict[str, int] = {}
     sections: dict[str, dict[str, int]] = {}
     for n, (key, section, divider) in enumerate(plan, start=1):
-        if divider:
+        if key == "contents":
+            label = ""
+        elif divider:
             label = "DIVIDER"
         else:
             seen[section] = seen.get(section, 0) + 1
@@ -66,3 +73,50 @@ def build_page_plan(tracked_shapes: bool) -> dict[str, Any]:
         span = sections.setdefault(section, {"first": n, "last": n})
         span["last"] = n
     return {"pages": pages, "order": [k for k, _, _ in plan], "total": len(plan), "sections": sections}
+
+
+def section_info(subject: str, tracked_shapes: bool, has_team_sheet: bool) -> dict[str, dict[str, Any]]:
+    """Title, blurb and sub-items per section: the single source for both the
+    divider pages and the contents page."""
+    overview = ["Match stats & team performance", "Match flow & xG race"]
+    if has_team_sheet:
+        overview.insert(0, "Team sheet, lineups & timeline")
+    return {
+        "overview": {
+            "num": 1, "title": "Overview",
+            "blurb": f"Who played, match stats, {subject}'s season-relative performance profile, "
+                     "and how the game unfolded." if has_team_sheet else
+                     f"Match stats, {subject}'s season-relative performance profile, and how the game unfolded.",
+            "items": overview,
+        },
+        "in_possession": {
+            "num": 2, "title": "In Possession",
+            "blurb": f"How both teams built play, how {subject} progressed threat, and how chance quality compared.",
+            "items": ["Separate passing networks",
+                      "Team-by-team tracked phase shapes" if tracked_shapes else "Combined event-data average locations",
+                      "Threat density, entries & player threat",
+                      "Comparative shot maps & xG sources"],
+        },
+        "out_of_possession": {
+            "num": 3, "title": "Out of Possession",
+            "blurb": f"Where {subject} engaged, competed and recovered the ball.",
+            "items": ["Pressure activity & spatial duel performance", "Opposition-half regains & second balls"],
+        },
+        "transition": {
+            "num": 4, "title": "Transition",
+            "blurb": f"Whether {subject} controlled the immediate response after losing the ball.",
+            "items": ["High attacking-half losses", "Counter-press regains", "Losses leading to shots"],
+        },
+    }
+
+
+def build_contents(plan: dict[str, Any], subject: str, tracked_shapes: bool,
+                   has_team_sheet: bool) -> list[dict[str, Any]]:
+    """Contents rows: section info plus the page span from the plan."""
+    info = section_info(subject, tracked_shapes, has_team_sheet)
+    rows = []
+    for section in SECTIONS:
+        span = plan["sections"][section]
+        pages = f"page {span['first']}" if span["first"] == span["last"] else f"pages {span['first']}\u2013{span['last']}"
+        rows.append({**info[section], "section": section, "pages": pages, "first": span["first"]})
+    return rows

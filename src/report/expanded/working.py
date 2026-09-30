@@ -23,7 +23,8 @@ from src.report import impect_cafcdb_source, metrics, palette, pitch
 from src.report.render_combined import build_context as build_shared_context
 from src.report.expanded import _fonts
 from src.report.expanded import season_baseline as sb
-from src.report.expanded.pages import build_page_plan
+from src.report.expanded import overview as overview_mod
+from src.report.expanded.pages import build_contents, build_page_plan, section_info
 
 
 def _heatmap_pitch_kwargs() -> dict:
@@ -1126,10 +1127,21 @@ def build_context(impect_match_id: int, dvms_match_id: str | None = None) -> dic
     entries_kpis=_entries_kpis(events,subject)
     pressure_img,pressure_kpis=_pressure_activity(pressure_events.loc[pressure_events["squadName"]==subject],events)
     transition_img,transition_kpis=_transition_response_map(events,subject,opponent)
-    page_plan=build_page_plan(bool(context["tracked_shapes"]))
+    tracked=bool(context["tracked_shapes"])
+    overview_ctx: dict[str, Any]={}
+    if dvms_match is not None:
+        from src.report import metrics_dvms
+        overview_ctx=overview_mod.overview_context(
+            dvms_match.f7,dvms_match.f24.events,dvms_match.avg_positions,
+            lambda x,y:metrics_dvms._metres_to_adj(x,y,dvms_match.meta),events,subject)
+    has_sheet=bool(overview_ctx)
+    page_plan=build_page_plan(tracked,has_sheet)
     context.update({
         "generated_date":dt.date.today().strftime("%d %B %Y"),
         "page_plan":page_plan,"report_page_count":page_plan["total"],
+        "section_info":section_info(subject,tracked,has_sheet),
+        "contents":build_contents(page_plan,subject,tracked,has_sheet),
+        **overview_ctx,
         "subject":subject,"opponent":opponent,"team_order":teams,"side_by_team":side_by_team,
         "network":networks,"network_scale_threat":network_scale_threat,
         "stat_rows_expanded":stat_rows_expanded,

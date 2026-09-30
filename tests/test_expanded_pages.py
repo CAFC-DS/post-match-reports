@@ -4,24 +4,30 @@ from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
-from src.report.expanded.pages import build_page_plan
+from src.report.expanded.pages import build_contents, build_page_plan, section_info
 
 TEMPLATES = Path(__file__).resolve().parents[1] / "src" / "report" / "expanded" / "templates"
 
 
-def test_page_counts_match_the_recovered_report():
-    assert build_page_plan(True)["total"] == 16
-    assert build_page_plan(False)["total"] == 15
+def test_page_counts():
+    # The recovered report was 16 / 15 pages; the contents page and the
+    # team-sheet page add two, and the team sheet needs DVMS lineups.
+    assert build_page_plan(True)["total"] == 18
+    assert build_page_plan(False)["total"] == 17
+    assert build_page_plan(True, has_team_sheet=False)["total"] == 17
+    assert "ov_sheet" not in build_page_plan(True, has_team_sheet=False)["pages"]
 
 
 def test_pages_are_numbered_contiguously_with_section_labels():
     plan = build_page_plan(True)
     numbers = [plan["pages"][key]["n"] for key in plan["order"]]
     assert numbers == list(range(1, plan["total"] + 1))
+    assert plan["pages"]["contents"]["n"] == 1
     assert plan["pages"]["div_ip"]["label"] == "DIVIDER"
+    assert plan["pages"]["ov_sheet"]["label"] == "PAGE 1/3"
     assert plan["pages"]["ip_shots"]["label"] == "PAGE 6/6"
     assert plan["pages"]["oop_regains"]["label"] == "PAGE 3/3"
-    assert plan["sections"]["in_possession"] == {"first": 4, "last": 10}
+    assert plan["sections"]["in_possession"] == {"first": 6, "last": 12}
 
 
 def test_untracked_layout_merges_the_shape_pages():
@@ -30,9 +36,9 @@ def test_untracked_layout_merges_the_shape_pages():
     assert plan["pages"]["ip_shots"]["label"] == "PAGE 5/5"
 
 
-def _stub_context(tracked: bool) -> dict:
+def _stub_context(tracked: bool, team_sheet: bool = True) -> dict:
     teams = ["Charlton Athletic", "Cardiff City"]
-    plan = build_page_plan(tracked)
+    plan = build_page_plan(tracked, team_sheet)
     ctx = collections.defaultdict(lambda: "")
     ctx.update(
         tracked_shapes=tracked,
@@ -61,17 +67,48 @@ def _stub_context(tracked: bool) -> dict:
         transition_kpis={k: 0 for k in ("high_losses_n", "counterpress_n", "shot_n", "shot_pct")},
         stat_rows_expanded=[],
         match_highlights=[],
+        section_info=section_info(teams[0], tracked, team_sheet),
+        contents=build_contents(plan, teams[0], tracked, team_sheet),
     )
+    if team_sheet:
+        row = {"shirt": 1, "name": "A Player", "role": "GK", "minutes": 96, "marks": [{"kind": "goal", "text": "7'"}]}
+        ctx.update(
+            timeline_img="",
+            team_sheets=[{"name": t, "is_charlton": i == 0, "formation": "4-2-3-1", "lineup_img": "",
+                          "starters": [row], "subs": [row], "unused": 2} for i, t in enumerate(teams)],
+        )
     return ctx
 
 
 def test_template_footers_follow_the_registry():
     env = Environment(loader=FileSystemLoader(str(TEMPLATES)), autoescape=select_autoescape(["html"]),
                       trim_blocks=True, lstrip_blocks=True)
-    for tracked in (True, False):
-        html = env.get_template("expanded.html.j2").render(**_stub_context(tracked))
-        total = build_page_plan(tracked)["total"]
+    for tracked, team_sheet in ((True, True), (False, True), (True, False)):
+        html = env.get_template("expanded.html.j2").render(**_stub_context(tracked, team_sheet))
+        total = build_page_plan(tracked, team_sheet)["total"]
         footers = re.findall(r'<div class="foot">(\d+)/(\d+)</div>', html)
         assert [int(n) for n, _ in footers] == list(range(1, total + 1))
         assert {int(t) for _, t in footers} == {total}
         assert html.count('<section class="sheet') == total
+
+
+def test_contents_page_lists_every_section_with_its_page_span():
+    plan = build_page_plan(True)
+    rows = build_contents(plan, "Charlton Athletic", True, True)
+    assert [r["title"] for r in rows] == ["Overview", "In Possession", "Out of Possession", "Transition"]
+    assert rows[0]["pages"] == "pages 2\u20135"
+    assert "Team sheet, lineups & timeline" in rows[0]["items"]
+    assert "Team-by-team tracked phase shapes" in rows[1]["items"]
+    assert "Combined event-data average locations" in build_contents(
+        build_page_plan(False), "Charlton Athletic", False, True)[1]["items"]
+
+
+def test_template_renders_contents_and_team_sheet():
+    env = Environment(loader=FileSystemLoader(str(TEMPLATES)), autoescape=select_autoescape(["html"]),
+                      trim_blocks=True, lstrip_blocks=True)
+    html = env.get_template("expanded.html.j2").render(**_stub_context(True))
+    assert "what's in this report and where to find it" in html
+    assert "Team Sheet, Lineups & Timeline" in html
+    assert "Substitutes used" in html
+    without = env.get_template("expanded.html.j2").render(**_stub_context(True, team_sheet=False))
+    assert "Team Sheet, Lineups" not in without
