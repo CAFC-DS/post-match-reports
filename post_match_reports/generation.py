@@ -14,7 +14,7 @@ from pypdf import PdfReader
 
 from src.dvms.loaders.fixtures import resolve_fixture
 from src.dvms.preprocess import is_preprocessed, preprocess_fixture
-from src.report import impect_cafcdb_source, metrics
+from src.report import impect_cafcdb_source, metrics, naming
 from src.report.expanded.working import render_report as render_expanded
 from src.report.render_combined import render_report as render_board
 
@@ -96,13 +96,8 @@ def generate_bundle(
         preprocess_fixture(fixture.fixture_id, fixture.opta_match_id)
         _log_stage("DVMS preprocessing complete")
 
-    def slug(value: str) -> str:
-        import re
-        return re.sub(r"[^A-Za-z0-9]+", "_", value).strip("_")
-
     expanded_path = output_dir / (
-        f"expanded_analyst_report_{slug(meta.home_team)}_v_{slug(meta.away_team)}_"
-        f"{meta.kickoff:%d-%m-%Y}.pdf"
+        naming.report_stem(naming.ANALYST, meta.home_team, meta.away_team) + ".pdf"
     )
     _log_stage("rendering expanded analyst report")
     render_expanded(
@@ -158,7 +153,8 @@ def generate_bundle(
         raise
     _log_stage("set-piece report subprocess returned")
     created = set(output_dir.glob("*.pdf")) - before
-    set_piece = [path for path in created if path.name.endswith("set_piece_report_players.pdf")]
+    set_piece_name = naming.report_stem(naming.SET_PIECE, meta.home_team, meta.away_team) + ".pdf"
+    set_piece = [path for path in created if path.name == set_piece_name]
     if len(set_piece) != 1:
         raise RuntimeError(f"Expected one set-piece PDF, found: {sorted(map(str, set_piece))}")
     _log_stage(f"set-piece report written to {set_piece[0]}")
