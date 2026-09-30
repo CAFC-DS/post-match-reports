@@ -157,7 +157,10 @@ def load_season_results(iteration_id: int, env_path: str = ".env") -> pd.DataFra
 
 
 def _kpi_row_for_player(event_kpis_json: str | None, player_id) -> dict:
-    if not event_kpis_json:
+    # A NULL EVENT_KPIS arrives as None from the cursor but as float NaN once
+    # pandas 3 has built the DataFrame (NaN is truthy), so test for "a
+    # non-empty string" rather than truthiness.
+    if not isinstance(event_kpis_json, str) or not event_kpis_json:
         return {}
     entries = json.loads(event_kpis_json)
     for entry in entries:
