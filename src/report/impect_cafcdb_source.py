@@ -51,6 +51,9 @@ _KPI_FIELDS = [
     # taken out of the game by a pass or dribble, confirmed present on
     # PASS/DRIBBLE events in EVENT_KPIS.
     "BYPASSED_OPPONENTS", "BYPASSED_DEFENDERS",
+    # Opponents taken out of the game by the *receiver* on a RECEPTION event
+    # (2026-09, analyst report: "where players received the ball").
+    "BYPASSED_OPPONENTS_RECEIVING",
 ]
 
 _EVENTS_SQL = """
