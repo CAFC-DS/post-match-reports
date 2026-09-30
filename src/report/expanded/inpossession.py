@@ -208,13 +208,13 @@ def packing_zone_chart(values: dict[str, float], colour: str, vmax: float, decim
                                edgecolor=palette.PAPER, linewidth=1.4, zorder=1))
         cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
         dark = shown and v / vmax > .4
-        ax.text(cx, y1 - 2.2, label.upper(), ha="center", va="top", fontsize=6.4, fontweight="bold",
+        ax.text(cx, y1 - 2.2, label.upper(), ha="center", va="top", fontsize=9.2, fontweight="bold",
                 color="white" if dark else palette.MUTED, zorder=3)
         if shown:
-            ax.text(cx, cy, f"{v:.{decimals}f}", ha="center", va="center", fontsize=15, fontweight="bold",
+            ax.text(cx, cy, f"{v:.{decimals}f}", ha="center", va="center", fontsize=19, fontweight="bold",
                     zorder=3, color="white" if v / vmax > .55 else palette.INK)
             if sub and sub.get(group):
-                ax.text(cx, cy - 6.5, sub[group], ha="center", va="center", fontsize=7, color=
+                ax.text(cx, cy - 7.2, sub[group], ha="center", va="center", fontsize=9, color=
                         "white" if dark else palette.MUTED, zorder=3)
     ax.add_patch(Rectangle((0, 0), 105, 68, fill=False, edgecolor=palette.INK, linewidth=1.0, zorder=4))
     ax.annotate("", xy=(103, -0.2), xytext=(88, -0.2), arrowprops=dict(arrowstyle="-|>", color=palette.MUTED, lw=.9))
@@ -265,7 +265,7 @@ def player_threat_chart(panels: dict[str, Any], colour: str) -> str:
         [("PASSING", panels["passing"], f"{panels['passing_total']:.2f}"),
          ("CARRYING", panels["carrying"], f"{panels['carrying_total']:.2f}"),
          ("RECEIVING", panels["receiving"], f"{panels['receiving_total']:.2f}")],
-        colour, _THREAT_SLOTS, (5.4, 4.2), decimals=3, label_size=8.4)
+        colour, _THREAT_SLOTS, (5.4, 6.4), decimals=3, label_size=8.8)
 
 
 # --------------------------------------------------------------------------- #
