@@ -39,20 +39,23 @@ class Comparison:
 
 def compare_pdfs(candidate: Path | str, golden: Path | str, *,
                  max_mean_pixel_delta: float = 0.01, exact: bool = False) -> Comparison:
-    """Compare two 16-page A4-landscape reports.
+    """Compare two A4-landscape reports of the same length.
 
     Pixel delta is the mean absolute RGB difference on a 0..1 scale at
     96dpi. Text and page geometry must match exactly; ``exact`` additionally
-    requires identical PDF bytes after normalising Chrome timestamps.
+    requires identical PDF bytes after normalising Chrome timestamps. The
+    expected page count is the golden's, so adding pages to the report only
+    requires regenerating the golden, not editing this module.
     """
     candidate = Path(candidate)
     golden = Path(golden)
     candidate_reader = PdfReader(candidate)
     golden_reader = PdfReader(golden)
-    if len(candidate_reader.pages) != 16 or len(golden_reader.pages) != 16:
+    expected_pages = len(golden_reader.pages)
+    if len(candidate_reader.pages) != expected_pages:
         raise AssertionError(
-            f"Expected 16 pages; candidate={len(candidate_reader.pages)}, "
-            f"golden={len(golden_reader.pages)}"
+            f"Expected {expected_pages} pages (the golden's); "
+            f"candidate={len(candidate_reader.pages)}"
         )
 
     for index, (candidate_page, golden_page) in enumerate(
@@ -90,7 +93,7 @@ def compare_pdfs(candidate: Path | str, golden: Path | str, *,
     exact_match = normalized_pdf_sha256(candidate) == normalized_pdf_sha256(golden)
     if exact and not exact_match:
         raise AssertionError("PDF bytes differ after normalising CreationDate and ModDate")
-    return Comparison(16, mean_delta, exact_match)
+    return Comparison(expected_pages, mean_delta, exact_match)
 
 
 def main() -> int:
