@@ -33,7 +33,10 @@ def unit_map(lineups: pd.DataFrame) -> dict[str, str]:
     """``opta player id -> unit`` from the F7 lineup (subs via SubPosition)."""
     out: dict[str, str] = {}
     for _, r in lineups.iterrows():
-        pos = r["sub_position"] or r["position"]
+        # A missing sub_position is NaN/pd.NA once pandas has typed the column
+        # as a string (pandas 3), and both are truthy -- so test for a value
+        # instead of relying on `or`, which left every starter without a unit.
+        pos = r["sub_position"] if pd.notna(r["sub_position"]) else r["position"]
         unit = _POSITION_UNIT.get(pos)
         if unit and pd.notna(r["player_id"]):
             out[str(r["player_id"])] = unit

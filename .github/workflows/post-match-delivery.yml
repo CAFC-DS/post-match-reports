@@ -87,9 +87,11 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .cache/cafc-dvms
-          key: dvms-${{ runner.os }}-${{ github.run_id }}
+          # v2: artifacts built while lines.unit_map ignored every starter (pandas 3
+          # NaN bug) have wrong team shapes; a new prefix makes them rebuild once.
+          key: dvms-v2-${{ runner.os }}-${{ github.run_id }}
           restore-keys: |
-            dvms-${{ runner.os }}-
+            dvms-v2-${{ runner.os }}-
 
       - name: Restore set-piece league events cache
         if: steps.gate.outputs.run == 'true'
