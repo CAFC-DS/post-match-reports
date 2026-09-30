@@ -934,8 +934,9 @@ def _xg_race(events: pd.DataFrame, teams: list[str]) -> str:
     60'/75'/90', chart_dvms.territory_chart's own convention), not
     matplotlib's default 0/20/40/60/80 -- the reference's two charts on this
     page share one axis convention."""
+    font=10.5                      # same type scale as the match-flow chart above it
     fig,ax=plt.subplots(figsize=(16.0,3.5),facecolor=palette.PAPER)
-    fig.subplots_adjust(left=0.07,right=0.99,top=0.92,bottom=0.18)
+    fig.subplots_adjust(left=0.07,right=0.99,top=0.96,bottom=0.15)
     ax.set_facecolor(palette.PAPER)
     cum_by_team = {}
     for team,color in zip(teams,[palette.CHARLTON_RED,palette.OPPONENT_GREY]):
@@ -943,7 +944,7 @@ def _xg_race(events: pd.DataFrame, teams: list[str]) -> str:
         s["minute"]=s["gameTime"].map(metrics.minute_num); s=s.sort_values("minute")
         s["cum"]=s["SHOT_XG"].cumsum()
         cum_by_team[team]=s
-        x=[0]+s["minute"].tolist()+[95]; y=[0]+s["cum"].tolist(); y=y+[y[-1]]
+        x=[0]+s["minute"].tolist()+[overview_mod.X_AXIS_MAX]; y=[0]+s["cum"].tolist(); y=y+[y[-1]]
         ax.step(x,y,where="post",label=team,color=color,lw=2)
     goals = events.loc[events["action"] == "GOAL"].sort_values("gameTimeInSec")
     for _, g in goals.iterrows():
@@ -956,12 +957,12 @@ def _xg_race(events: pd.DataFrame, teams: list[str]) -> str:
         ax.scatter([g_minute], [y_at], s=42, color=palette.INK, zorder=5,
                    edgecolors=palette.PAPER, linewidth=0.8)
         ax.annotate(str(g["playerName"]).split()[-1], (g_minute, y_at), xytext=(0, 7), textcoords="offset points",
-                    fontsize=7, fontweight="bold", color=palette.INK, ha="center", zorder=5)
-    ax.set_xlim(0,95); ax.spines[["top","right"]].set_visible(False); ax.grid(color=palette.HAIR_SOFT,lw=.6)
-    ax.set_xticks([0, 15, 30, 45, 60, 75, 90])
-    ax.set_xticklabels(["0'", "15'", "30'", "HT", "60'", "75'", "90'"])
-    ax.set_ylabel("Cumulative\nnon-penalty xG", fontsize=7.5, color=palette.MUTED, linespacing=1.4)
-    ax.tick_params(labelsize=7,colors=palette.MUTED); ax.legend(frameon=False,fontsize=7,loc="upper left")
+                    fontsize=font, fontweight="bold", color=palette.INK, ha="center", zorder=5)
+    ax.set_xlim(0,overview_mod.X_AXIS_MAX); ax.spines[["top","right"]].set_visible(False); ax.grid(color=palette.HAIR_SOFT,lw=.6)
+    ax.set_xticks(overview_mod.X_AXIS_TICKS)
+    ax.set_xticklabels(overview_mod.X_AXIS_LABELS)
+    ax.set_ylabel("Cumulative\nnon-penalty xG", fontsize=font, color=palette.MUTED, linespacing=1.4)
+    ax.tick_params(labelsize=font,colors=palette.MUTED); ax.legend(frameon=False,fontsize=font,loc="upper left")
     return _uri_fixed(fig)
 
 
@@ -982,7 +983,7 @@ def _threat_density_maps(events: pd.DataFrame, teams: list[str]) -> tuple[dict[s
     vmax = max([1e-9] + [float(b["statistic"].max()) for b in stats.values()])
     images = {}
     for team, bin_stat in stats.items():
-        fig, ax = pitch_obj.draw(figsize=(6.6, 4.4))
+        fig, ax = pitch_obj.draw(figsize=(3.4, 2.27))        # half-page panel size
         fig.set_facecolor(palette.PAPER_2)
         pitch_obj.heatmap(bin_stat, ax=ax, cmap=_THERMAL_CMAP, edgecolors="none", alpha=0.92,
                           norm=PowerNorm(0.6, vmin=0, vmax=vmax), zorder=1)
@@ -1089,6 +1090,17 @@ def _transition_speed_mps(events: pd.DataFrame, team: str, dvms_match) -> float:
     return total_gain / total_time if total_time else 0.0
 
 
+_SUMMARY_KPIS = [("possession_pct", "Possession"), ("shots", "Shots"), ("shots_on_target", "On target"),
+                 ("non_penalty_xg", "xG"), ("pass_accuracy_pct", "Pass accuracy"),
+                 ("touches_in_opposition_box", "Box touches")]
+
+
+def _summary_kpis(stats: pd.DataFrame, subject: str, opponent: str) -> list[dict[str, str]]:
+    """Headline numbers for the overview's summary strip, subject first."""
+    return [{"label": label, "subject": _fmt_expanded(key, float(stats.loc[subject, key])),
+             "opponent": _fmt_expanded(key, float(stats.loc[opponent, key]))} for key, label in _SUMMARY_KPIS]
+
+
 def _flow_timeline(events: pd.DataFrame, dvms_match, timeline_by_team, subject: str, opponent: str) -> str:
     """Territory flow (tracking) or Impect momentum (fallback) with goals, cards
     and substitutions marked, for the overview's match-flow panel."""
@@ -1183,7 +1195,7 @@ def build_context(impect_match_id: int, dvms_match_id: str | None = None) -> dic
         "match_highlights":_match_highlights(charlton_match_values,baseline,subject,opponent,speed_subject,speed_opponent),
         "xg_race_img":_xg_race(events,teams),
         "threat_density_img":threat_density_img,"threat_density_kpis":threat_density_kpis,
-        "flow_timeline_img":flow_timeline_img,
+        "flow_timeline_img":flow_timeline_img,"summary_kpis":_summary_kpis(team_stats,subject,opponent),
         "entries_kpis":entries_kpis,
         "chance_source_img":chance_source_img,"chance_source_kpis":chance_source_kpis,
         "player_threat_ranking_img":player_threat_ranking_img,

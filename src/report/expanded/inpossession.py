@@ -91,12 +91,16 @@ def _moves(events: pd.DataFrame, team: str) -> pd.DataFrame:
 # Progression by packing zone
 # --------------------------------------------------------------------------- #
 def progression_zones(events: pd.DataFrame, team: str) -> dict[str, Any]:
-    """Opponents bypassed by the team's successful passes and carries, by the
-    role zone the ball was progressed to."""
+    """Opponents (and, separately, defenders) bypassed by the team's successful
+    passes and carries, by the role zone the ball was progressed *to*: the zone
+    is the role of the player the ball reached, not where the bypassed
+    opponents stood."""
     t = _moves(events, team)
     t = t[(t["result"] == "SUCCESS") & (t["BYPASSED_OPPONENTS"] > 0)]
     values = _role_values(t, "endPackingZone", t["BYPASSED_OPPONENTS"].astype(float))
-    return {"values": values, "total": float(sum(values.values())), "actions": int(len(t))}
+    defenders = _role_values(t, "endPackingZone", t["BYPASSED_DEFENDERS"].fillna(0.0).astype(float))
+    return {"values": values, "defenders": defenders, "total": float(sum(values.values())),
+            "defenders_total": float(sum(defenders.values())), "actions": int(len(t))}
 
 
 # --------------------------------------------------------------------------- #
@@ -191,12 +195,16 @@ def _shade(colour: str, fraction: float) -> tuple[float, float, float, float]:
 
 
 def packing_zone_chart(values: dict[str, float], colour: str, vmax: float, decimals: int = 0,
-                       sub: dict[str, str] | None = None) -> str:
+                       sub: dict[str, str] | None = None, label_prefix: str = "", small: bool = False) -> str:
     """Role-line map: the twelve packing-zone groups as a schematic line-up, own
     goal on the left. Each cell is shaded by its value against ``vmax`` (shared
     by both teams) and prints the value; zero cells stay blank. ``sub`` adds a
-    small second line per cell."""
-    fig, ax = plt.subplots(figsize=(6.6, 4.4), facecolor=palette.PAPER_2)
+    small second line per cell and ``label_prefix`` (e.g. ``"TO "``) says the
+    zone is the role the ball *reached*. ``small`` draws the map at the size of a
+    half-page panel, with type set for that size rather than scaled down."""
+    size, label_font, value_font, sub_font, sub_gap = ((3.3, 2.2), 5.6, 10.0, 5.6, 7.6) if small else \
+                                                      ((6.6, 4.4), 9.2, 19.0, 9.0, 7.2)
+    fig, ax = plt.subplots(figsize=size, facecolor=palette.PAPER_2)
     fig.subplots_adjust(0, 0, 1, 1)
     ax.set_facecolor(palette.PAPER_2)
     ax.set_xlim(-1, 106); ax.set_ylim(-1, 69); ax.set_aspect("equal"); ax.axis("off")
@@ -208,14 +216,14 @@ def packing_zone_chart(values: dict[str, float], colour: str, vmax: float, decim
                                edgecolor=palette.PAPER, linewidth=1.4, zorder=1))
         cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
         dark = shown and v / vmax > .4
-        ax.text(cx, y1 - 2.2, label.upper(), ha="center", va="top", fontsize=9.2, fontweight="bold",
-                color="white" if dark else palette.MUTED, zorder=3)
+        ax.text(cx, y1 - 2.2, (label_prefix + label).upper(), ha="center", va="top", fontsize=label_font,
+                fontweight="bold", color="white" if dark else palette.MUTED, zorder=3)
         if shown:
-            ax.text(cx, cy, f"{v:.{decimals}f}", ha="center", va="center", fontsize=19, fontweight="bold",
+            ax.text(cx, cy, f"{v:.{decimals}f}", ha="center", va="center", fontsize=value_font, fontweight="bold",
                     zorder=3, color="white" if v / vmax > .55 else palette.INK)
             if sub and sub.get(group):
-                ax.text(cx, cy - 7.2, sub[group], ha="center", va="center", fontsize=9, color=
-                        "white" if dark else palette.MUTED, zorder=3)
+                ax.text(cx, cy - sub_gap, sub[group], ha="center", va="center", fontsize=sub_font,
+                        color="white" if dark else palette.MUTED, zorder=3)
     ax.add_patch(Rectangle((0, 0), 105, 68, fill=False, edgecolor=palette.INK, linewidth=1.0, zorder=4))
     ax.annotate("", xy=(103, -0.2), xytext=(88, -0.2), arrowprops=dict(arrowstyle="-|>", color=palette.MUTED, lw=.9))
     return pitch._fig_to_uri(fig)
@@ -260,12 +268,13 @@ def entry_givers_chart(givers: dict[str, Any], colour: str) -> str:
 
 
 def player_threat_chart(panels: dict[str, Any], colour: str) -> str:
-    """Three bar panels per team: passing, carrying and receiving threat."""
+    """Three bar panels per team: passing, carrying and receiving threat, drawn at
+    the width of a half-page card so the labels print at their set size."""
     return _bar_panels_chart(
         [("PASSING", panels["passing"], f"{panels['passing_total']:.2f}"),
          ("CARRYING", panels["carrying"], f"{panels['carrying_total']:.2f}"),
          ("RECEIVING", panels["receiving"], f"{panels['receiving_total']:.2f}")],
-        colour, _THREAT_SLOTS, (5.4, 6.4), decimals=3, label_size=8.8)
+        colour, _THREAT_SLOTS, (5.4, 2.95), decimals=3, label_size=7.6)
 
 
 # --------------------------------------------------------------------------- #
@@ -306,10 +315,15 @@ def inpossession_context(events: pd.DataFrame, subject: str, opponent: str) -> d
         }
 
     return {
-        "progression_img": {t: packing_zone_chart(prog[t]["values"], colour[t], prog_max) for t in teams},
-        "progression_kpis": {t: {"total": int(round(prog[t]["total"])), "actions": prog[t]["actions"]} for t in teams},
-        "threat_zone_img": {t: packing_zone_chart(threat[t]["values"], colour[t], threat_max, decimals=2)
-                            for t in teams},
+        "progression_img": {
+            t: packing_zone_chart(prog[t]["values"], colour[t], prog_max, label_prefix="To ",
+                                  sub={g: f"{int(round(prog[t]['defenders'].get(g, 0.0)))} def."
+                                       for g, v in prog[t]["values"].items() if round(v) > 0})
+            for t in teams},
+        "progression_kpis": {t: {"total": int(round(prog[t]["total"])), "actions": prog[t]["actions"],
+                                 "defenders": int(round(prog[t]["defenders_total"]))} for t in teams},
+        "threat_zone_img": {t: packing_zone_chart(threat[t]["values"], colour[t], threat_max, decimals=2,
+                                                  label_prefix="To ", small=True) for t in teams},
         "threat_zone_kpis": {t: {"total": f"{threat[t]['total']:.2f}", "actions": threat[t]["actions"]}
                              for t in teams},
         "reception_ctx": reception_ctx,

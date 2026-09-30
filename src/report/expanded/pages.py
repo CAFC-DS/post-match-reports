@@ -33,7 +33,6 @@ def _plan(tracked_shapes: bool, has_team_sheet: bool) -> list[tuple[str, str, bo
     plan += [
         ("ip_receptions", "in_possession", False),
         ("ip_threat_zones", "in_possession", False),
-        ("ip_player_threat", "in_possession", False),
         ("ip_entries", "in_possession", False),
         ("ip_shots", "in_possession", False),
         ("div_oop", "out_of_possession", True),
@@ -97,8 +96,7 @@ def section_info(subject: str, tracked_shapes: bool, has_team_sheet: bool) -> di
             "items": ["Passing networks & progression",
                       "Team-by-team tracked phase shapes" if tracked_shapes else "Combined event-data average locations",
                       "Where players received the ball",
-                      "Threat density & threat by role zone",
-                      "Player threat: passing, carrying, receiving",
+                      "Threat density, role zones & player threat",
                       "Final-third & box entries",
                       "Comparative shot maps & xG sources"],
         },

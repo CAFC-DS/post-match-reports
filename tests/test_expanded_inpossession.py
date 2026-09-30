@@ -10,7 +10,8 @@ def _events(rows):
     base = dict(squadName=CHA, playerName="Some Player", actionType="PASS", action="LOW_PASS", result="SUCCESS",
                 startAdjCoordinatesX=0.0, startAdjCoordinatesY=0.0, endAdjCoordinatesX=0.0, endAdjCoordinatesY=0.0,
                 startPitchPosition="MIDDLE", endPitchPosition="MIDDLE", startPackingZone="CMC", endPackingZone="CMC",
-                BYPASSED_OPPONENTS=0.0, BYPASSED_OPPONENTS_RECEIVING=0.0, PXT_ATTACK=0.0, eventId=0)
+                BYPASSED_OPPONENTS=0.0, BYPASSED_DEFENDERS=0.0, BYPASSED_OPPONENTS_RECEIVING=0.0, PXT_ATTACK=0.0,
+                eventId=0)
     return pd.DataFrame([{**base, **r, "eventId": i} for i, r in enumerate(rows)])
 
 
@@ -28,6 +29,18 @@ def test_progression_zones_group_by_role_and_count_opponents_bypassed():
     out = ip.progression_zones(events, CHA)
     assert out["values"] == {"DM": 3.0, "AM": 3.0}
     assert out["total"] == 6.0 and out["actions"] == 5      # OPP_ and untagged rows still count as actions
+    assert out["defenders"] == {"DM": 0.0, "AM": 0.0} and out["defenders_total"] == 0.0
+
+
+def test_progression_zones_count_defenders_bypassed_separately():
+    events = _events([
+        dict(endPackingZone="AMC", BYPASSED_OPPONENTS=3.0, BYPASSED_DEFENDERS=2.0),
+        dict(endPackingZone="AMC", BYPASSED_OPPONENTS=1.0, BYPASSED_DEFENDERS=np.nan),   # missing counts as none
+        dict(endPackingZone="DMC", BYPASSED_OPPONENTS=2.0, BYPASSED_DEFENDERS=0.0),       # past forwards only
+    ])
+    out = ip.progression_zones(events, CHA)
+    assert out["values"] == {"AM": 4.0, "DM": 2.0}
+    assert out["defenders"] == {"AM": 2.0, "DM": 0.0} and out["defenders_total"] == 2.0
 
 
 def test_threat_zone_values_keep_positive_open_play_threat_only():
@@ -118,6 +131,8 @@ def test_charts_render_to_data_uris():
     assert ip.packing_zone_chart(values, "#d01012", vmax=101.0).startswith("data:image/png;base64,")
     assert ip.packing_zone_chart(values, "#7d7869", vmax=101.0, sub={"DM": "29 received"}).startswith("data:image/png")
     assert ip.packing_zone_chart({}, "#7d7869", vmax=0.0, decimals=2).startswith("data:image/png")
+    assert ip.packing_zone_chart(values, "#d01012", vmax=101.0, label_prefix="To ", small=True).startswith(
+        "data:image/png")
     givers = ip.entry_givers(_events([dict(playerName="A One", endPitchPosition="FINAL_THIRD")]), CHA)
     assert ip.entry_givers_chart(givers, "#d01012").startswith("data:image/png")
     panels = ip.player_threat_panels(_events([dict(playerName="A One", PXT_ATTACK=0.1)]), CHA)
@@ -136,6 +151,6 @@ def test_inpossession_context_shares_scales_and_covers_both_teams():
     for key in ("progression_img", "progression_kpis", "threat_zone_img", "threat_zone_kpis", "reception_ctx",
                 "entry_givers_ctx", "player_threat_ctx"):
         assert set(ctx[key]) == {CHA, OPP}, key
-    assert ctx["progression_kpis"][CHA] == {"total": 2, "actions": 1}
+    assert ctx["progression_kpis"][CHA] == {"total": 2, "actions": 1, "defenders": 0}
     assert ctx["progression_kpis"][OPP]["total"] == 8
     assert ctx["reception_ctx"][CHA]["players"][0]["name"] == "One"

@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 
+import numpy as np
 import pandas as pd
 
 from src.report.expanded import overview as ov
@@ -124,3 +125,45 @@ def test_impect_positions_match_players_by_name():
     assert pos["hd1"] == (-25.0, 15.0) and pos["hs2"] == (25.0, -5.0)
     assert "hm1" not in pos
     assert ov.impect_positions(None, home) is None
+
+
+def test_team_goals_and_half_time_score_use_the_right_period():
+    f7 = _f7()
+    f7.goals.append(SimpleNamespace(minute=45, second=0, scorer_id="hs2", assist_id=None, team_id="1"))   # 45+ stoppage
+    f7.goals.append(SimpleNamespace(minute=70, second=0, scorer_id="a1", assist_id="a1", team_id="2"))
+    f24 = _f24([
+        dict(type_id=16, minute=10, period_id=1, seq=1, player_id="hs1", team_id="1"),
+        dict(type_id=16, minute=46, period_id=1, seq=2, player_id="hs2", team_id="1"),   # first-half stoppage
+        dict(type_id=16, minute=70, period_id=2, seq=3, player_id="a1", team_id="2"),
+    ])
+    goals = ov.team_goals(f7, "1")
+    assert [(g["who"], g["min"]) for g in goals] == [("Str1", "10'"), ("Str2", "45'")] and goals[0]["assist"] == "Mid2"
+    assert ov.team_goals(f7, "2") == [{"who": "Keeper", "min": "70'", "assist": "Keeper"}]
+    assert ov.half_time_score(f7, f24) == {"1": 2, "2": 0}
+
+
+def test_simultaneous_substitutions_share_one_label():
+    events = [
+        {"minute": 81.7, "kind": "sub", "player": "Scanlon"},
+        {"minute": 82.0, "kind": "sub", "player": "Lawlor"},
+        {"minute": 82.0, "kind": "yellow", "player": "Bagan"},
+        {"minute": 90.0, "kind": "sub", "player": "Ashford"},
+    ]
+    merged = ov._merge_substitutions(events)
+    assert [e["player"] for e in merged] == ["Scanlon / Lawlor", "Bagan", "Ashford"]
+    assert [e["kind"] for e in merged] == ["sub", "yellow", "sub"]
+
+
+def test_flow_timeline_chart_renders_with_late_events_and_shares_the_xg_axis():
+    x = np.linspace(0, 96, 97)
+    y = 20 * np.sin(x / 9)
+    events = [("Charlton Athletic", True, [{"minute": 28.0, "kind": "goal", "player": "Campbell"},
+                                           {"minute": 95.0, "kind": "yellow", "player": "Colwill"},
+                                           {"minute": 96.0, "kind": "yellow", "player": "Another"}]),
+              ("Cardiff City", False, [{"minute": 60.0, "kind": "goal", "player": "Moylan"},
+                                       {"minute": 81.7, "kind": "sub", "player": "Scanlon"},
+                                       {"minute": 82.0, "kind": "sub", "player": "Lawlor"}])]
+    assert ov.flow_timeline_chart(x, y, events).startswith("data:image/png;base64,")
+    assert ov.flow_timeline_chart(x, y * 0, [("Charlton Athletic", True, []), ("Cardiff City", False, [])],
+                                  y_label="Net threat").startswith("data:image/png")
+    assert ov.X_AXIS_MAX > 96 and ov.X_AXIS_TICKS[-1] == 90

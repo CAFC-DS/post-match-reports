@@ -11,10 +11,10 @@ TEMPLATES = Path(__file__).resolve().parents[1] / "src" / "report" / "expanded" 
 
 def test_page_counts():
     # The recovered report was 16 / 15 pages; the contents page, the team-sheet
-    # page (needs DVMS lineups) and the receptions / threat-zone pages add four.
-    assert build_page_plan(True)["total"] == 20
-    assert build_page_plan(False)["total"] == 19
-    assert build_page_plan(True, has_team_sheet=False)["total"] == 19
+    # page (needs DVMS lineups) and the receptions / threat pages add three.
+    assert build_page_plan(True)["total"] == 19
+    assert build_page_plan(False)["total"] == 18
+    assert build_page_plan(True, has_team_sheet=False)["total"] == 18
     assert "ov_sheet" not in build_page_plan(True, has_team_sheet=False)["pages"]
 
 
@@ -25,19 +25,19 @@ def test_pages_are_numbered_contiguously_with_section_labels():
     assert plan["pages"]["contents"]["n"] == 1
     assert plan["pages"]["div_ip"]["label"] == "DIVIDER"
     assert plan["pages"]["ov_sheet"]["label"] == "PAGE 1/3"
-    assert plan["pages"]["net"]["label"] == "PAGE 1/8"
-    assert plan["pages"]["ip_receptions"]["label"] == "PAGE 4/8"
-    assert plan["pages"]["ip_player_threat"]["label"] == "PAGE 6/8"
-    assert plan["pages"]["ip_shots"]["label"] == "PAGE 8/8"
-    assert "net_0" not in plan["pages"]
+    assert plan["pages"]["net"]["label"] == "PAGE 1/7"
+    assert plan["pages"]["ip_receptions"]["label"] == "PAGE 4/7"
+    assert plan["pages"]["ip_threat_zones"]["label"] == "PAGE 5/7"
+    assert plan["pages"]["ip_shots"]["label"] == "PAGE 7/7"
+    assert "net_0" not in plan["pages"] and "ip_player_threat" not in plan["pages"]
     assert plan["pages"]["oop_regains"]["label"] == "PAGE 3/3"
-    assert plan["sections"]["in_possession"] == {"first": 6, "last": 14}
+    assert plan["sections"]["in_possession"] == {"first": 6, "last": 13}
 
 
 def test_untracked_layout_merges_the_shape_pages():
     plan = build_page_plan(False)
     assert "shapes" in plan["pages"] and "shapes_0" not in plan["pages"]
-    assert plan["pages"]["ip_shots"]["label"] == "PAGE 7/7"
+    assert plan["pages"]["ip_shots"]["label"] == "PAGE 6/6"
 
 
 def _stub_context(tracked: bool, team_sheet: bool = True) -> dict:
@@ -75,7 +75,9 @@ def _stub_context(tracked: bool, team_sheet: bool = True) -> dict:
         match_highlights=[],
         section_info=section_info(teams[0], tracked, team_sheet),
         progression_img={t: "" for t in teams},
-        progression_kpis={t: {"total": 10, "actions": 5} for t in teams},
+        progression_kpis={t: {"total": 10, "actions": 5, "defenders": 3} for t in teams},
+        summary_kpis=[{"label": "Possession", "subject": "41%", "opponent": "59%"},
+                      {"label": "xG", "subject": "0.97", "opponent": "2.40"}],
         threat_density_img={t: "" for t in teams},
         threat_density_kpis={t: {"pxt": "1.00", "actions": 7} for t in teams},
         threat_zone_img={t: "" for t in teams},
@@ -94,7 +96,9 @@ def _stub_context(tracked: bool, team_sheet: bool = True) -> dict:
         row = {"shirt": 1, "name": "A Player", "role": "GK", "minutes": 96, "marks": [{"kind": "goal", "text": "7'"}]}
         ctx.update(
             team_sheets=[{"name": t, "is_charlton": i == 0, "formation": "4-2-3-1", "lineup_img": "",
-                          "starters": [row], "subs": [row], "unused": 2} for i, t in enumerate(teams)],
+                          "starters": [row], "subs": [row], "unused": 2, "unused_names": ["Keeper", "Spare"],
+                          "score": 1 - i, "ht": 1, "goals": [{"who": "Scorer", "min": "28'", "assist": "Setter"}]}
+                         for i, t in enumerate(teams)],
         )
     return ctx
 
@@ -138,12 +142,24 @@ def test_template_renders_the_in_possession_panels():
     env = Environment(loader=FileSystemLoader(str(TEMPLATES)), autoescape=select_autoescape(["html"]),
                       trim_blocks=True, lstrip_blocks=True)
     html = env.get_template("expanded.html.j2").render(**_stub_context(True))
-    for text in ("Passing Networks & Progression", "PROGRESSION", "Where Players Received The Ball", "Top receivers",
-                 "Threat Creation", "THREAT DENSITY", "THREAT BY ROLE ZONE", "Player Threat",
-                 "Final Third & Box Entries", "WHO GOT THE BALL THERE", "Match Flow, Territory & Timeline"):
+    for text in ("Passing Networks & Progression", "PROGRESSION", "3 defenders", "Where Players Received The Ball",
+                 "Top receivers", "Threat Creation & Player Threat", "Threat density", "Threat by role zone",
+                 "Player threat", "Final Third & Box Entries", "WHO GOT THE BALL THERE",
+                 "Match Flow, Territory & Timeline"):
         assert text in html, text
     assert "<b>50%</b> through" in html and "<b>30%</b> over" in html and "<b>20%</b> around" in html
     assert "Match Timeline" not in html
+    assert html.count("Player Threat") == 1          # one page, no separate player-threat page
+
+
+def test_team_sheet_page_has_the_match_summary_strip():
+    env = Environment(loader=FileSystemLoader(str(TEMPLATES)), autoescape=select_autoescape(["html"]),
+                      trim_blocks=True, lstrip_blocks=True)
+    html = env.get_template("expanded.html.j2").render(**_stub_context(True))
+    assert "Half-time 1 – 1" in html
+    assert "<b>28'</b> Scorer" in html and "assist Setter" in html
+    assert "Possession" in html and "0.97" in html and "2.40" in html
+    assert "Unused substitutes: Keeper, Spare" in html
 
 
 def test_entries_fall_back_to_completion_when_there_is_no_line_break_data():

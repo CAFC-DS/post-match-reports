@@ -15,6 +15,12 @@ import numpy as np
 import pandas as pd
 
 _T_OFF, _T_ON, _T_CARD = 18, 19, 17
+
+# One x-axis for the match-flow chart and the xG race beneath it. It runs to 98
+# (not 95) so stoppage-time events are not cut off at the edge.
+X_AXIS_MAX = 98.0
+X_AXIS_TICKS = [0, 15, 30, 45, 60, 75, 90]
+X_AXIS_LABELS = ["0'", "15'", "30'", "HT", "60'", "75'", "90'"]
 _Q_YELLOW, _Q_SECOND_YELLOW, _Q_RED = 31, 32, 33
 _ABBREV = {"Goalkeeper": "GK", "Defender": "DEF", "Midfielder": "MID", "Forward": "FWD", "Striker": "FWD"}
 
@@ -449,6 +455,20 @@ def lineup_chart(slots: list[dict[str, Any]], is_charlton: bool, match_end: floa
     return _png_uri(fig, tight=False)
 
 
+def _merge_substitutions(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """One marker per moment: substitutions within a minute of each other become
+    a single "A / B 82'" event so their labels never overprint."""
+    out: list[dict[str, Any]] = []
+    for e in events:
+        prev = out[-1] if out else None
+        if (e["kind"] == "sub" and prev is not None and prev["kind"] == "sub"
+                and abs(float(e["minute"]) - float(prev["minute"])) <= 1.0):
+            prev["player"] = f"{prev['player']} / {e['player']}"
+        else:
+            out.append(dict(e))
+    return out
+
+
 def flow_timeline_chart(x, y, timeline_by_team: list[tuple[str, bool, list[dict[str, Any]]]], *,
                         y_label: str = "Territory (m)") -> str:
     """Match flow and timeline in one chart.
@@ -456,73 +476,78 @@ def flow_timeline_chart(x, y, timeline_by_team: list[tuple[str, bool, list[dict[
     The rolling territory wave (``y`` > 0 is the subject's attacking half, red;
     below zero is the opponent's, grey) with each team's goals, cards and
     substitutions marked above (subject) and below (opponent) it on the same
-    0-95 minute axis. The figure width and margins match the xG race drawn
+    0-98 minute axis. The figure width and margins match the xG race drawn
     beneath it so the two x-axes line up.
+
+    Everything is set in one type scale at print size (the figure is shown at
+    about two thirds of its width): labels, ticks, axis label and legend share
+    a size, and only goals are bold.
 
     ``timeline_by_team`` is ``[(team name, is_subject, events), ...]`` as
     returned by :func:`timeline_events`.
     """
+    import matplotlib.patheffects as pe
     import matplotlib.pyplot as plt
     import numpy as np
-    from matplotlib.patches import Rectangle
+    from matplotlib.patches import FancyBboxPatch
 
     from src.report import palette
 
+    font = 10.5
+    x_max = X_AXIS_MAX
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
     peak = max(float(np.abs(y).max()) if len(y) else 0.0, 5.0)
-    fig, ax = plt.subplots(figsize=(16.0, 4.4), facecolor=palette.PAPER)
-    fig.subplots_adjust(left=0.07, right=0.99, top=0.97, bottom=0.12)
+    fig, ax = plt.subplots(figsize=(16.0, 4.6), facecolor=palette.PAPER)
+    fig.subplots_adjust(left=0.07, right=0.99, top=0.98, bottom=0.12)
     ax.set_facecolor(palette.PAPER)
     ax.fill_between(x, y, 0, where=y >= 0, interpolate=True, color=palette.CHARLTON_RED, alpha=.9, linewidth=0, zorder=3)
     ax.fill_between(x, y, 0, where=y <= 0, interpolate=True, color=palette.OPPONENT_GREY, alpha=.85, linewidth=0, zorder=3)
     ax.plot(x, y, color=palette.INK, linewidth=.7, alpha=.35, zorder=4)
     ax.axhline(0, color=palette.INK, linewidth=1.0, zorder=5)
     ax.axvline(45, color=palette.HAIR, linewidth=1.0, linestyle=(0, (3, 3)), zorder=1)
-    ax.set_xlim(0, 95)
-    ax.set_ylim(-peak * 2.25, peak * 2.25)
-    ax.set_xticks([0, 15, 30, 45, 60, 75, 90])
-    ax.set_xticklabels(["0'", "15'", "30'", "HT", "60'", "75'", "90'"])
-    ax.tick_params(labelsize=8, colors=palette.MUTED, length=0)
-    ax.set_ylabel(y_label, fontsize=7.5, color=palette.MUTED)
+    ax.set_xlim(0, x_max)
+    ax.set_ylim(-peak * 2.9, peak * 2.9)
+    ax.set_xticks(X_AXIS_TICKS)
+    ax.set_xticklabels(X_AXIS_LABELS)
+    ax.tick_params(labelsize=font, colors=palette.MUTED, length=0)
+    ax.set_ylabel(y_label, fontsize=font, color=palette.MUTED)
     ax.spines[["top", "right", "left"]].set_visible(False)
     ax.spines["bottom"].set_color(palette.HAIR)
 
-    base, step = peak * 1.25, peak * .3
-    halo = [pe_stroke(palette.PAPER)]
+    halo = [pe.withStroke(linewidth=2.6, foreground=palette.PAPER)]
+    base, step = peak * 1.3, peak * .34
+    char_w = .56                       # width of one character in minutes at this size
     for lane, (team, is_subject, events) in enumerate(timeline_by_team):
         sign = 1 if lane == 0 else -1
         colour = palette.CHARLTON_RED if is_subject else palette.OPPONENT_GREY
-        last_end = [-99.0, -99.0, -99.0]
-        for e in events:
-            m, kind = min(float(e["minute"]), 95.0), e["kind"]
+        right_edge = [-99.0] * 4       # where each label level is already occupied up to
+        for e in _merge_substitutions(events):
+            m, kind = min(float(e["minute"]), x_max - 1.6), e["kind"]
             y0 = sign * base
             if kind == "goal":
-                ax.scatter([m], [y0], s=120, c=colour, edgecolors=palette.PAPER, linewidths=1.2, zorder=6)
-                size, weight = 9.6, "bold"
+                ax.scatter([m], [y0], s=170, c=colour, edgecolors=palette.PAPER, linewidths=1.3, zorder=6)
             elif kind in ("yellow", "red"):
                 face = "#e0b12a" if kind == "yellow" else palette.CHARLTON_RED_DARK
-                ax.add_patch(Rectangle((m - .4, y0 - peak * .13), .8, peak * .26, color=face, zorder=6, lw=0))
-                size, weight = 8.0, "normal"
+                ax.add_patch(FancyBboxPatch((m - .55, y0 - peak * .17), 1.1, peak * .34, boxstyle="round,pad=0,rounding_size=.15",
+                                            facecolor=face, edgecolor="none", zorder=6))
             else:
-                ax.scatter([m], [y0], s=42, marker="^" if sign > 0 else "v", c=palette.SUCCESS_GREEN,
-                           edgecolors=palette.PAPER, linewidths=.8, zorder=6)
-                size, weight = 7.8, "normal"
-            level = next((i for i in range(3) if m - last_end[i] > 8.5), 2)
-            last_end[level] = m
-            ax.text(m, sign * (base + peak * .3 + level * step), f"{e['player']} {int(e['minute'])}'", ha="center",
-                    va="bottom" if sign > 0 else "top", fontsize=size, fontweight=weight, zorder=7,
-                    color=colour if kind == "goal" else palette.INK, path_effects=halo)
-    for i, (label, face, marker) in enumerate((("goal", palette.INK, "\u25cf"), ("yellow card", "#e0b12a", "\u25a0"),
+                ax.scatter([m], [y0], s=95, marker="^" if sign > 0 else "v", c=palette.SUCCESS_GREEN,
+                           edgecolors=palette.PAPER, linewidths=.9, zorder=6)
+            text = f"{e['player']} {int(e['minute'])}'"
+            half = len(text) * char_w / 2
+            centre = min(max(m, half + .3), x_max - half - .3)       # keep the label inside the axes
+            level = next((i for i in range(4) if centre - half > right_edge[i] + .8), 3)
+            right_edge[level] = centre + half
+            ax.text(centre, sign * (base + peak * .36 + level * step), text, ha="center",
+                    va="bottom" if sign > 0 else "top", fontsize=font, zorder=7, path_effects=halo,
+                    fontweight="bold" if kind == "goal" else "normal",
+                    color=colour if kind == "goal" else palette.INK)
+    for i, (label, face, marker) in enumerate((("goal", palette.INK, "\u25cf"), ("yellow card", "#c99a1c", "\u25a0"),
                                                ("red card", palette.CHARLTON_RED_DARK, "\u25a0"),
                                                ("substitution (player on)", palette.SUCCESS_GREEN, "\u25b2"))):
-        fig.text(0.56 + i * 0.105, 0.012, f"{marker} {label}", fontsize=8, color=face, ha="left")
+        fig.text(0.56 + i * 0.11, 0.012, f"{marker} {label}", fontsize=font, color=face, ha="left")
     return _png_uri(fig, tight=False, dpi=200)
-
-
-def pe_stroke(colour: str):
-    import matplotlib.patheffects as pe
-    return pe.withStroke(linewidth=2.4, foreground=colour)
 
 
 # --------------------------------------------------------------------------- #
@@ -550,6 +575,34 @@ def _sheet_rows(players: list[SheetPlayer], match_end: float) -> list[dict[str, 
     return rows
 
 
+def team_goals(f7, team_id: str) -> list[dict[str, Any]]:
+    """``[{"who", "min", "assist"}]`` for goals *credited to* ``team_id``
+    (an own goal counts for the side it benefits), in match order."""
+    names = {str(r["player_id"]): str(r["last_name"]) for _, r in f7.lineups.iterrows()}
+    out = []
+    for goal in sorted(f7.goals, key=lambda g: (g.minute, g.second or 0)):
+        if str(goal.team_id) != str(team_id):
+            continue
+        out.append({"who": names.get(str(goal.scorer_id), "?"), "min": f"{int(goal.minute)}'",
+                    "assist": names.get(str(goal.assist_id)) if goal.assist_id else None})
+    return out
+
+
+def half_time_score(f7, f24_events: pd.DataFrame) -> dict[str, int]:
+    """Goals per team id scored in the first half. Each F7 goal is matched to its
+    F24 goal event (same player, within a minute) for the period; without a
+    match it falls back to "minute <= 45"."""
+    goal_events = f24_events[f24_events["type_id"] == 16]
+    out: dict[str, int] = {f7.home.team_id: 0, f7.away.team_id: 0}
+    for goal in f7.goals:
+        hit = goal_events[(goal_events["player_id"].astype(str) == str(goal.scorer_id))
+                          & ((goal_events["minute"] - int(goal.minute)).abs() <= 1)]
+        first_half = bool((hit["period_id"] == 1).any()) if len(hit) else int(goal.minute) <= 45
+        if first_half and str(goal.team_id) in out:
+            out[str(goal.team_id)] += 1
+    return out
+
+
 def overview_context(f7, f24_events: pd.DataFrame, avg_positions, to_adj, impect_events: pd.DataFrame,
                      subject: str) -> dict[str, Any]:
     """Everything the overview page needs: per-team sheet rows, lineup images
@@ -569,6 +622,10 @@ def overview_context(f7, f24_events: pd.DataFrame, avg_positions, to_adj, impect
             "starters": _sheet_rows(sheet.starters, match_end),
             "subs": _sheet_rows(used, match_end),
             "unused": len(sheet.substitutes) - len(used),
+            "unused_names": [p.last_name for p in sheet.substitutes if not p.played],
+            "score": int(f7.home.score if sheet.side == "home" else f7.away.score),
+            "goals": team_goals(f7, sheet.team_id),
+            "ht": half_time_score(f7, f24_events)[sheet.team_id],
         })
     timeline_by_team = [(sh.name, sh.name.lower() == subject.lower(), timeline_events(sh)) for sh in ordered]
     return {"team_sheets": cards, "timeline_by_team": timeline_by_team, "match_end_minute": match_end}
