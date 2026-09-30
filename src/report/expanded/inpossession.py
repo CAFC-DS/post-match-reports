@@ -209,6 +209,7 @@ def packing_zone_chart(values: dict[str, float], colour: str, vmax: float, decim
     ax.set_facecolor(palette.PAPER_2)
     ax.set_xlim(-1, 106); ax.set_ylim(-1, 69); ax.set_aspect("equal"); ax.axis("off")
     vmax = vmax or 1.0
+    units_per_pt = 107 / (size[0] * 72)
     for group, x0, x1, y0, y1, label in _ROLE_CELLS:
         v = float(values.get(group, 0.0))
         shown = round(v, decimals) > 0
@@ -216,7 +217,10 @@ def packing_zone_chart(values: dict[str, float], colour: str, vmax: float, decim
                                edgecolor=palette.PAPER, linewidth=1.4, zorder=1))
         cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
         dark = shown and v / vmax > .4
-        ax.text(cx, y1 - 2.2, (label_prefix + label).upper(), ha="center", va="top", fontsize=label_font,
+        text = (label_prefix + label).upper()
+        if len(text) * label_font * 0.62 * units_per_pt > (x1 - x0) - 1.5:      # too wide for the cell: stack the words
+            text = text.replace(" ", "\n")
+        ax.text(cx, y1 - 2.2, text, ha="center", va="top", fontsize=label_font, linespacing=1.05,
                 fontweight="bold", color="white" if dark else palette.MUTED, zorder=3)
         if shown:
             ax.text(cx, cy, f"{v:.{decimals}f}", ha="center", va="center", fontsize=value_font, fontweight="bold",
