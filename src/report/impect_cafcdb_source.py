@@ -84,6 +84,8 @@ select
     e.PHASE as "phase",
     e.PLAYER_ID as "playerId",
     pn.NAME as "playerName",
+    e.PLAYER_POSITION as "playerPosition",
+    e.PLAYER_POSITION_SIDE as "playerPositionSide",
     e.ACTION_TYPE as "actionType",
     e.ACTION as "action",
     e.RESULT as "result",

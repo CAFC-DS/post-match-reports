@@ -152,7 +152,8 @@ def role_labels(rows: list[int]) -> list[list[str]]:
     return labels
 
 
-def lineup_slots(sheet: TeamSheet, positions: dict[str, tuple[float, float]] | None) -> list[dict[str, Any]]:
+def lineup_slots(sheet: TeamSheet, positions: dict[str, tuple[float, float]] | None,
+                 roles: dict[str, tuple[str, int]] | None = None) -> list[dict[str, Any]]:
     """Place the starters on a formation grid.
 
     ``positions`` maps player id -> (depth, lateral) from tracking: depth grows
@@ -180,11 +181,16 @@ def lineup_slots(sheet: TeamSheet, positions: dict[str, tuple[float, float]] | N
     slots = [{"player": keeper[0], "row": 0, "x": 0.0, "role": "GK", "rows": len(rows) + 1}]
     cursor = 0
     for r, n in enumerate(rows, start=1):
-        group = sorted(ordered[cursor:cursor + n], key=lambda p: -have[p.player_id][1])  # left first
+        members = ordered[cursor:cursor + n]
+        # Left to right: Impect's side tag when present (robust to inverted
+        # full-backs and drifting wingers), otherwise tracked lateral position.
+        group = sorted(members, key=lambda p: (roles[p.player_id][1], -have[p.player_id][1])
+                       if roles and p.player_id in roles else (2, -have[p.player_id][1]))
         cursor += n
         for i, p in enumerate(group):
             x = (i + 1) / (n + 1)
-            slots.append({"player": p, "row": r, "x": x, "role": labels[r - 1][i], "rows": len(rows) + 1})
+            role = roles[p.player_id][0] if roles and p.player_id in roles else labels[r - 1][i]
+            slots.append({"player": p, "row": r, "x": x, "role": role, "rows": len(rows) + 1})
     return slots
 
 
@@ -240,7 +246,7 @@ def build_team_sheets(f7, f24_events: pd.DataFrame,
         sheet = TeamSheet(team_id=meta.team_id, side=side, name=meta.name,
                           formation=meta.formation, players=list(players.values()))
         positions = _positions_for(avg_positions, side, to_adj, sheet) or impect_positions(impect_events, sheet)
-        _assign_roles(sheet, positions)
+        _assign_roles(sheet, positions, impect_roles(impect_events, sheet))
         sheets[side] = sheet
     return sheets, match_end
 
@@ -266,39 +272,104 @@ def _norm(name: str) -> str:
                    if c.isalnum() or c == " ").strip()
 
 
-def impect_positions(events: pd.DataFrame | None, sheet: TeamSheet) -> dict[str, tuple[float, float]] | None:
-    """Median event location per starter, matched to Impect by name.
-
-    Impect and Opta share no player id, so a starter is matched on the full
-    name, then on the last word of their last name within the same squad.
-    """
+def _impect_squad(events: pd.DataFrame | None, sheet: TeamSheet) -> pd.DataFrame | None:
     if events is None or events.empty or "playerName" not in events.columns:
         return None
     squad = events[events["squadName"].astype(str).str.lower() == sheet.name.lower()]
-    squad = squad[squad["playerName"].notna() & squad["startAdjCoordinatesX"].notna()]
-    if squad.empty:
-        return None
+    squad = squad[squad["playerName"].notna()]
+    return None if squad.empty else squad
+
+
+def _impect_names(squad: pd.DataFrame, sheet: TeamSheet) -> dict[str, str]:
+    """F7 player id -> Impect playerName.
+
+    Impect and Opta share no player id, so a player is matched on the full
+    name, then on the last word of their last name when that is unique in
+    the squad.
+    """
     by_full = {_norm(n): n for n in squad["playerName"].unique()}
     by_last: dict[str, list[str]] = {}
     for n in squad["playerName"].unique():
         by_last.setdefault(_norm(n).split()[-1], []).append(n)
-    out: dict[str, tuple[float, float]] = {}
-    for p in sheet.starters:
+    out: dict[str, str] = {}
+    for p in sheet.players:
         match = by_full.get(_norm(p.name))
         if match is None:
             candidates = by_last.get(_norm(p.last_name).split()[-1], [])
             match = candidates[0] if len(candidates) == 1 else None
-        if match is None:
-            continue
-        rows = squad[squad["playerName"] == match]
-        out[p.player_id] = (float(rows["startAdjCoordinatesX"].median()),
-                            float(rows["startAdjCoordinatesY"].median()))
+        if match is not None:
+            out[p.player_id] = match
+    return out
+
+
+def impect_positions(events: pd.DataFrame | None, sheet: TeamSheet) -> dict[str, tuple[float, float]] | None:
+    """Median event location per starter, matched to Impect by name."""
+    squad = _impect_squad(events, sheet)
+    if squad is None:
+        return None
+    squad = squad[squad["startAdjCoordinatesX"].notna()]
+    names = _impect_names(squad, sheet)
+    out: dict[str, tuple[float, float]] = {}
+    for p in sheet.starters:
+        if p.player_id in names:
+            rows = squad[squad["playerName"] == names[p.player_id]]
+            out[p.player_id] = (float(rows["startAdjCoordinatesX"].median()),
+                                float(rows["startAdjCoordinatesY"].median()))
     return out or None
 
 
-def _assign_roles(sheet: TeamSheet, positions) -> None:
-    """Give starters formation-derived roles; substitutes inherit from whoever they replaced."""
-    slots = lineup_slots(sheet, positions)
+# Impect tags every event with the player's position and side for that match.
+_SIDE_RANK = {"LEFT": 0, "CENTRE_LEFT": 1, "CENTRE": 2, "CENTRE_RIGHT": 3, "RIGHT": 4}
+_POSITION_LABEL = {
+    "GOALKEEPER": "GK", "LEFT_WINGBACK_DEFENDER": "LB", "RIGHT_WINGBACK_DEFENDER": "RB",
+    "LEFT_BACK": "LB", "RIGHT_BACK": "RB", "DEFENSE_MIDFIELD": "DM", "CENTRAL_MIDFIELD": "CM",
+    "ATTACKING_MIDFIELD": "AM", "LEFT_MIDFIELD": "LM", "RIGHT_MIDFIELD": "RM",
+    "LEFT_WINGER": "LW", "RIGHT_WINGER": "RW", "CENTER_FORWARD": "CF", "CENTRE_FORWARD": "CF",
+    "SECOND_STRIKER": "SS",
+}
+
+
+def impect_role(position: str | None, side: str | None) -> str | None:
+    """``("CENTRAL_DEFENDER", "CENTRE_LEFT")`` -> ``"LCB"``; None if untagged."""
+    if not position or not isinstance(position, str):
+        return None
+    side = side if isinstance(side, str) else ""
+    if position == "CENTRAL_DEFENDER":
+        return {"CENTRE_LEFT": "LCB", "CENTRE_RIGHT": "RCB"}.get(side, "CB")
+    label = _POSITION_LABEL.get(position)
+    if label is None:
+        return None
+    if label in ("DM", "CM") and side in ("CENTRE_LEFT", "LEFT"):
+        return "L" + label
+    if label in ("DM", "CM") and side in ("CENTRE_RIGHT", "RIGHT"):
+        return "R" + label
+    return label
+
+
+def impect_roles(events: pd.DataFrame | None, sheet: TeamSheet) -> dict[str, tuple[str, int]] | None:
+    """F7 player id -> (role label, left-to-right rank) from Impect's own
+    position tags (the most frequent tag across the player's events)."""
+    squad = _impect_squad(events, sheet)
+    if squad is None or "playerPosition" not in squad.columns:
+        return None
+    squad = squad[squad["playerPosition"].notna()]
+    names = _impect_names(squad, sheet)
+    out: dict[str, tuple[str, int]] = {}
+    for pid, name in names.items():
+        rows = squad[squad["playerName"] == name]
+        if rows.empty:
+            continue
+        pair = rows.groupby(["playerPosition", "playerPositionSide"], dropna=False).size().idxmax()
+        role = impect_role(pair[0], pair[1])
+        if role is not None:
+            out[pid] = (role, _SIDE_RANK.get(pair[1] if isinstance(pair[1], str) else "CENTRE", 2))
+    return out or None
+
+
+def _assign_roles(sheet: TeamSheet, positions, roles=None) -> None:
+    """Give starters a role (Impect's tag, else formation-derived); substitutes
+    inherit from whoever they replaced."""
+    slots = lineup_slots(sheet, positions, roles)
     by_id = {s["player"].player_id: s["role"] for s in slots}
     for p in sheet.starters:
         p.role = by_id.get(p.player_id, p.role)
@@ -367,13 +438,13 @@ def lineup_chart(slots: list[dict[str, Any]], is_charlton: bool, match_end: floa
         player = s["player"]
         x = 6 + s["x"] * 56 if s["row"] else 34
         y = 9 + s["row"] * (84 / max(n_rows - 1, 1))
-        ax.scatter([x], [y], s=430, c=colour, edgecolors=palette.PAPER, linewidths=1.6, zorder=3)
+        ax.scatter([x], [y], s=560, c=colour, edgecolors=palette.PAPER, linewidths=1.6, zorder=3)
         ax.text(x, y, "" if player.shirt is None else str(player.shirt), ha="center", va="center",
-                fontsize=8.5, fontweight="bold", color="white", zorder=4)
-        ax.text(x, y - 6.3, player.last_name.split()[-1], ha="center", va="top", fontsize=6.0,
+                fontsize=10.5, fontweight="bold", color="white", zorder=4)
+        ax.text(x, y - 6.8, player.last_name.split()[-1], ha="center", va="top", fontsize=7.8,
                 fontweight="bold", color=palette.INK, zorder=4)
         if player.off_min is not None:
-            ax.text(x, y - 10.6, f"▼ {int(player.off_min)}'", ha="center", va="top", fontsize=5.6,
+            ax.text(x, y - 11.9, f"▼ {int(player.off_min)}'", ha="center", va="top", fontsize=6.6,
                     color=palette.MUTED, zorder=4)
     return _png_uri(fig, tight=False)
 
@@ -389,8 +460,8 @@ def timeline_chart(events_by_team: list[tuple[str, bool, list[dict[str, Any]]]],
 
     from src.report import palette
 
-    fig, ax = plt.subplots(figsize=(13.6, 2.35), facecolor=palette.PAPER)
-    fig.subplots_adjust(left=0.115, right=0.985, top=0.93, bottom=0.2)
+    fig, ax = plt.subplots(figsize=(13.6, 3.0), facecolor=palette.PAPER)
+    fig.subplots_adjust(left=0.12, right=0.985, top=0.93, bottom=0.17)
     ax.set_facecolor(palette.PAPER)
     end = max(match_end, 90.0)
     ax.set_xlim(-1.5, end + 1.5)
@@ -402,31 +473,31 @@ def timeline_chart(events_by_team: list[tuple[str, bool, list[dict[str, Any]]]],
     ticks = [0, 15, 30, 45, 60, 75, 90] + ([int(end)] if end > 92 else [])
     ax.set_xticks(ticks)
     ax.set_xticklabels(["0'", "15'", "30'", "HT", "60'", "75'", "90'"] + ([f"{int(end)}'"] if end > 92 else []),
-                       fontsize=7.5, color=palette.MUTED)
+                       fontsize=9.5, color=palette.MUTED)
     ax.tick_params(length=0)
 
     for lane, (team, is_charlton, events) in enumerate(events_by_team):
         sign = 1 if lane == 0 else -1
         colour = palette.CHARLTON_RED if is_charlton else palette.OPPONENT_GREY
-        fig.text(0.005, 0.5 + sign * 0.28, team.upper(), fontsize=7.5, fontweight="bold", color=colour, va="center")
+        fig.text(0.005, 0.5 + sign * 0.27, team.upper(), fontsize=9.5, fontweight="bold", color=colour, va="center")
         last_label_end = {0: -99.0, 1: -99.0, 2: -99.0}
         for e in events:
             m, kind = float(e["minute"]), e["kind"]
             if kind == "goal":
                 ax.scatter([m], [sign * .62], s=150, c=colour, edgecolors=palette.PAPER, linewidths=1.2, zorder=4)
-                text, size, weight = f"{e['player']} {int(m)}'", 7.2, "bold"
+                text, size, weight = f"{e['player']} {int(m)}'", 9.4, "bold"
             elif kind in ("yellow", "red"):
                 face = "#e0b12a" if kind == "yellow" else palette.CHARLTON_RED_DARK
                 ax.add_patch(Rectangle((m - .45, sign * .62 - .2), .9, .4, color=face, zorder=4, lw=0))
-                text, size, weight = f"{e['player']} {int(m)}'", 6.3, "normal"
+                text, size, weight = f"{e['player']} {int(m)}'", 8.0, "normal"
             else:
                 ax.scatter([m], [sign * .62], s=42, marker="^" if sign > 0 else "v", c=palette.SUCCESS_GREEN,
                            edgecolors=palette.PAPER, linewidths=.8, zorder=4)
-                text, size, weight = f"{e['player']} {int(m)}'", 6.0, "normal"
+                text, size, weight = f"{e['player']} {int(m)}'", 7.6, "normal"
             # Stack labels on three rows so neighbours never overprint.
-            level = next((i for i in range(3) if m - last_label_end[i] > 6.2), 2)
+            level = next((i for i in range(3) if m - last_label_end[i] > 7.6), 2)
             last_label_end[level] = m
-            ax.text(m, sign * (.98 + level * .27), text, ha="center", va="bottom" if sign > 0 else "top",
+            ax.text(m, sign * (.98 + level * .3), text, ha="center", va="bottom" if sign > 0 else "top",
                     fontsize=size, fontweight=weight, color=colour if kind == "goal" else palette.INK, zorder=5)
     handles = [
         ("goal", "o", palette.INK), ("yellow card", "s", "#e0b12a"),
@@ -434,7 +505,7 @@ def timeline_chart(events_by_team: list[tuple[str, bool, list[dict[str, Any]]]],
     ]
     for i, (label, marker, face) in enumerate(handles):
         fig.text(0.56 + i * 0.105, 0.045, ("●" if marker == "o" else "■" if marker == "s" else "▲") + " " + label,
-                 fontsize=6.8, color=face if marker != "o" else palette.INK, ha="left")
+                 fontsize=8.6, color=face if marker != "o" else palette.INK, ha="left")
     return _png_uri(fig, tight=False)
 
 
@@ -473,7 +544,7 @@ def overview_context(f7, f24_events: pd.DataFrame, avg_positions, to_adj, impect
     for sheet in ordered:
         is_subject = sheet.name.lower() == subject.lower()
         slots = lineup_slots(sheet, _positions_for(avg_positions, sheet.side, to_adj, sheet)
-                             or impect_positions(impect_events, sheet))
+                             or impect_positions(impect_events, sheet), impect_roles(impect_events, sheet))
         used = [p for p in sheet.substitutes if p.played]
         cards.append({
             "name": sheet.name, "is_charlton": is_subject,
