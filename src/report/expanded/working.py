@@ -965,22 +965,29 @@ def _xg_race(events: pd.DataFrame, teams: list[str]) -> str:
     return _uri_fixed(fig)
 
 
-def _threat_heatmap(events: pd.DataFrame, team: str) -> tuple[str, float, int]:
-    """Smoothed threat-density heatmap on the shared vertical pitch (was a
-    coarse 10x14-bin hist2d with no pitch markings at all). Returns the
-    image plus the two summary numbers the reference captions the panel
-    with ('X positive PXT Attack · Y actions')."""
-    t = events.loc[(events["squadName"] == team) & events["PXT_ATTACK"].notna() & (events["PXT_ATTACK"] > 0)]
-    pitch_obj = VerticalPitch(pad_top=1, pad_bottom=1, pad_left=1, pad_right=1, **_heatmap_pitch_kwargs())
-    fig, ax = pitch_obj.draw(figsize=(5.2, 7.4))
-    fig.set_facecolor(palette.PAPER_2)
-    x, y = pitch._to_pitch(t["startAdjCoordinatesX"], t["startAdjCoordinatesY"])
-    bin_stat = pitch_obj.bin_statistic(x, y, values=t["PXT_ATTACK"], statistic="sum", bins=(24, 34))
-    bin_stat["statistic"] = gaussian_filter(bin_stat["statistic"], 1.8)
-    vmax = float(bin_stat["statistic"].max()) or 1.0
-    pitch_obj.heatmap(bin_stat, ax=ax, cmap=_THERMAL_CMAP, edgecolors="none", alpha=0.92,
-                       norm=PowerNorm(0.6, vmin=0, vmax=vmax), zorder=1)
-    return _uri(fig), round(float(t["PXT_ATTACK"].sum()), 2), len(t)
+def _threat_density_maps(events: pd.DataFrame, teams: list[str]) -> tuple[dict[str, str], dict[str, dict[str, Any]]]:
+    """Smoothed threat-density heatmaps, one per team, on the same horizontal
+    pitch and the *same* colour scale so the two can be compared directly.
+    Returns ``({team: image}, {team: {"pxt", "actions"}})`` with the summary
+    numbers the panel is captioned with ('X positive PXT Attack, Y actions')."""
+    pitch_obj = Pitch(pad_top=1, pad_bottom=1, pad_left=1, pad_right=1, **_heatmap_pitch_kwargs())
+    stats, kpis = {}, {}
+    for team in teams:
+        t = events.loc[(events["squadName"] == team) & events["PXT_ATTACK"].notna() & (events["PXT_ATTACK"] > 0)]
+        x, y = pitch._to_pitch(t["startAdjCoordinatesX"], t["startAdjCoordinatesY"])
+        bin_stat = pitch_obj.bin_statistic(x, y, values=t["PXT_ATTACK"], statistic="sum", bins=(34, 24))
+        bin_stat["statistic"] = gaussian_filter(bin_stat["statistic"], 1.8)
+        stats[team] = bin_stat
+        kpis[team] = {"pxt": f"{float(t['PXT_ATTACK'].sum()):.2f}", "actions": int(len(t))}
+    vmax = max([1e-9] + [float(b["statistic"].max()) for b in stats.values()])
+    images = {}
+    for team, bin_stat in stats.items():
+        fig, ax = pitch_obj.draw(figsize=(6.6, 4.4))
+        fig.set_facecolor(palette.PAPER_2)
+        pitch_obj.heatmap(bin_stat, ax=ax, cmap=_THERMAL_CMAP, edgecolors="none", alpha=0.92,
+                          norm=PowerNorm(0.6, vmin=0, vmax=vmax), zorder=1)
+        images[team] = _uri(fig)
+    return images, kpis
 
 
 def _infer_pass_receivers(events: pd.DataFrame) -> pd.DataFrame:
@@ -1082,6 +1089,30 @@ def _transition_speed_mps(events: pd.DataFrame, team: str, dvms_match) -> float:
     return total_gain / total_time if total_time else 0.0
 
 
+def _flow_timeline(events: pd.DataFrame, dvms_match, timeline_by_team, subject: str, opponent: str) -> str:
+    """Territory flow (tracking) or Impect momentum (fallback) with goals, cards
+    and substitutions marked, for the overview's match-flow panel."""
+    if timeline_by_team is None:      # no DVMS team sheet: use the Impect-inferred goals, cards and subs
+        found=metrics.timeline(events,str(events["homeSquadName"].iloc[0]),str(events["awaySquadName"].iloc[0]))
+        timeline_by_team=[(team,team==subject,[{"minute":e.minute,"kind":e.kind,"player":e.label}
+                                               for e in found if e.team==team]) for team in (subject,opponent)]
+    wave=None
+    if dvms_match is not None:
+        from src.report import metrics_dvms
+        try:
+            wave=metrics_dvms.territory_wave(dvms_match)
+            if wave.empty:
+                wave=None
+        except Exception:
+            wave=None
+    if wave is not None:
+        return overview_mod.flow_timeline_chart(wave["minute"],wave["territory_m"],timeline_by_team,
+                                                y_label="Territory (m from halfway)")
+    momentum=metrics.momentum(events,subject,opponent)
+    return overview_mod.flow_timeline_chart(momentum["minute"],momentum["momentum"],timeline_by_team,
+                                            y_label="Net threat (rolling)")
+
+
 def build_context(impect_match_id: int, dvms_match_id: str | None = None) -> dict[str, Any]:
     context=build_shared_context(impect_match_id,dvms_match_id)
     dvms_match=None
@@ -1124,7 +1155,7 @@ def build_context(impect_match_id: int, dvms_match_id: str | None = None) -> dic
     charlton_match_values=sb.match_metrics(events,subject,opponent)
     speed_subject=_transition_speed_mps(events,subject,dvms_match)
     speed_opponent=_transition_speed_mps(events,opponent,dvms_match)
-    threat_img,threat_pxt,threat_actions=_threat_heatmap(events,subject)
+    threat_density_img,threat_density_kpis=_threat_density_maps(events,teams)
     entries_kpis=_entries_kpis(events,subject)
     pressure_img,pressure_kpis=_pressure_activity(pressure_events.loc[pressure_events["squadName"]==subject],events)
     transition_img,transition_kpis=_transition_response_map(events,subject,opponent)
@@ -1136,6 +1167,7 @@ def build_context(impect_match_id: int, dvms_match_id: str | None = None) -> dic
             dvms_match.f7,dvms_match.f24.events,dvms_match.avg_positions,
             lambda x,y:metrics_dvms._metres_to_adj(x,y,dvms_match.meta),events,subject)
     has_sheet=bool(overview_ctx)
+    flow_timeline_img=_flow_timeline(events,dvms_match,overview_ctx.get("timeline_by_team"),subject,opponent)
     page_plan=build_page_plan(tracked,has_sheet)
     context.update({
         "generated_date":dt.date.today().strftime("%d %B %Y"),
@@ -1150,7 +1182,8 @@ def build_context(impect_match_id: int, dvms_match_id: str | None = None) -> dic
         "performance_img":_performance_wheel(charlton_match_values,baseline),
         "match_highlights":_match_highlights(charlton_match_values,baseline,subject,opponent,speed_subject,speed_opponent),
         "xg_race_img":_xg_race(events,teams),
-        "threat_img":threat_img,"threat_pxt":threat_pxt,"threat_actions":threat_actions,
+        "threat_density_img":threat_density_img,"threat_density_kpis":threat_density_kpis,
+        "flow_timeline_img":flow_timeline_img,
         "entries_kpis":entries_kpis,
         "chance_source_img":chance_source_img,"chance_source_kpis":chance_source_kpis,
         "player_threat_ranking_img":player_threat_ranking_img,

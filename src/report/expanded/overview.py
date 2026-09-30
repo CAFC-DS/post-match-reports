@@ -449,64 +449,80 @@ def lineup_chart(slots: list[dict[str, Any]], is_charlton: bool, match_end: floa
     return _png_uri(fig, tight=False)
 
 
-def timeline_chart(events_by_team: list[tuple[str, bool, list[dict[str, Any]]]], match_end: float) -> str:
-    """Both teams' goals, cards and substitutions on one 0-90+ axis.
+def flow_timeline_chart(x, y, timeline_by_team: list[tuple[str, bool, list[dict[str, Any]]]], *,
+                        y_label: str = "Territory (m)") -> str:
+    """Match flow and timeline in one chart.
 
-    ``events_by_team`` is ``[(team name, is_charlton, events), ...]`` and is
-    drawn top to bottom in that order.
+    The rolling territory wave (``y`` > 0 is the subject's attacking half, red;
+    below zero is the opponent's, grey) with each team's goals, cards and
+    substitutions marked above (subject) and below (opponent) it on the same
+    0-95 minute axis. The figure width and margins match the xG race drawn
+    beneath it so the two x-axes line up.
+
+    ``timeline_by_team`` is ``[(team name, is_subject, events), ...]`` as
+    returned by :func:`timeline_events`.
     """
     import matplotlib.pyplot as plt
+    import numpy as np
     from matplotlib.patches import Rectangle
 
     from src.report import palette
 
-    fig, ax = plt.subplots(figsize=(13.6, 3.0), facecolor=palette.PAPER)
-    fig.subplots_adjust(left=0.12, right=0.985, top=0.93, bottom=0.17)
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+    peak = max(float(np.abs(y).max()) if len(y) else 0.0, 5.0)
+    fig, ax = plt.subplots(figsize=(16.0, 4.4), facecolor=palette.PAPER)
+    fig.subplots_adjust(left=0.07, right=0.99, top=0.97, bottom=0.12)
     ax.set_facecolor(palette.PAPER)
-    end = max(match_end, 90.0)
-    ax.set_xlim(-1.5, end + 1.5)
-    ax.set_ylim(-1.75, 1.75)
-    ax.axvspan(0, 45, color=palette.PAPER_2, zorder=0)
-    ax.axvline(45, color=palette.HAIR, lw=1.0, zorder=1)
-    ax.axhline(0, color=palette.INK, lw=.8, zorder=1)
-    ax.set_yticks([]); ax.spines[:].set_visible(False)
-    ticks = [0, 15, 30, 45, 60, 75, 90] + ([int(end)] if end > 92 else [])
-    ax.set_xticks(ticks)
-    ax.set_xticklabels(["0'", "15'", "30'", "HT", "60'", "75'", "90'"] + ([f"{int(end)}'"] if end > 92 else []),
-                       fontsize=9.5, color=palette.MUTED)
-    ax.tick_params(length=0)
+    ax.fill_between(x, y, 0, where=y >= 0, interpolate=True, color=palette.CHARLTON_RED, alpha=.9, linewidth=0, zorder=3)
+    ax.fill_between(x, y, 0, where=y <= 0, interpolate=True, color=palette.OPPONENT_GREY, alpha=.85, linewidth=0, zorder=3)
+    ax.plot(x, y, color=palette.INK, linewidth=.7, alpha=.35, zorder=4)
+    ax.axhline(0, color=palette.INK, linewidth=1.0, zorder=5)
+    ax.axvline(45, color=palette.HAIR, linewidth=1.0, linestyle=(0, (3, 3)), zorder=1)
+    ax.set_xlim(0, 95)
+    ax.set_ylim(-peak * 2.25, peak * 2.25)
+    ax.set_xticks([0, 15, 30, 45, 60, 75, 90])
+    ax.set_xticklabels(["0'", "15'", "30'", "HT", "60'", "75'", "90'"])
+    ax.tick_params(labelsize=8, colors=palette.MUTED, length=0)
+    ax.set_ylabel(y_label, fontsize=7.5, color=palette.MUTED)
+    ax.spines[["top", "right", "left"]].set_visible(False)
+    ax.spines["bottom"].set_color(palette.HAIR)
 
-    for lane, (team, is_charlton, events) in enumerate(events_by_team):
+    base, step = peak * 1.25, peak * .3
+    halo = [pe_stroke(palette.PAPER)]
+    for lane, (team, is_subject, events) in enumerate(timeline_by_team):
         sign = 1 if lane == 0 else -1
-        colour = palette.CHARLTON_RED if is_charlton else palette.OPPONENT_GREY
-        fig.text(0.005, 0.5 + sign * 0.27, team.upper(), fontsize=9.5, fontweight="bold", color=colour, va="center")
-        last_label_end = {0: -99.0, 1: -99.0, 2: -99.0}
+        colour = palette.CHARLTON_RED if is_subject else palette.OPPONENT_GREY
+        last_end = [-99.0, -99.0, -99.0]
         for e in events:
-            m, kind = float(e["minute"]), e["kind"]
+            m, kind = min(float(e["minute"]), 95.0), e["kind"]
+            y0 = sign * base
             if kind == "goal":
-                ax.scatter([m], [sign * .62], s=150, c=colour, edgecolors=palette.PAPER, linewidths=1.2, zorder=4)
-                text, size, weight = f"{e['player']} {int(m)}'", 9.4, "bold"
+                ax.scatter([m], [y0], s=120, c=colour, edgecolors=palette.PAPER, linewidths=1.2, zorder=6)
+                size, weight = 9.6, "bold"
             elif kind in ("yellow", "red"):
                 face = "#e0b12a" if kind == "yellow" else palette.CHARLTON_RED_DARK
-                ax.add_patch(Rectangle((m - .45, sign * .62 - .2), .9, .4, color=face, zorder=4, lw=0))
-                text, size, weight = f"{e['player']} {int(m)}'", 8.0, "normal"
+                ax.add_patch(Rectangle((m - .4, y0 - peak * .13), .8, peak * .26, color=face, zorder=6, lw=0))
+                size, weight = 8.0, "normal"
             else:
-                ax.scatter([m], [sign * .62], s=42, marker="^" if sign > 0 else "v", c=palette.SUCCESS_GREEN,
-                           edgecolors=palette.PAPER, linewidths=.8, zorder=4)
-                text, size, weight = f"{e['player']} {int(m)}'", 7.6, "normal"
-            # Stack labels on three rows so neighbours never overprint.
-            level = next((i for i in range(3) if m - last_label_end[i] > 7.6), 2)
-            last_label_end[level] = m
-            ax.text(m, sign * (.98 + level * .3), text, ha="center", va="bottom" if sign > 0 else "top",
-                    fontsize=size, fontweight=weight, color=colour if kind == "goal" else palette.INK, zorder=5)
-    handles = [
-        ("goal", "o", palette.INK), ("yellow card", "s", "#e0b12a"),
-        ("red card", "s", palette.CHARLTON_RED_DARK), ("substitution (player on)", "^", palette.SUCCESS_GREEN),
-    ]
-    for i, (label, marker, face) in enumerate(handles):
-        fig.text(0.56 + i * 0.105, 0.045, ("●" if marker == "o" else "■" if marker == "s" else "▲") + " " + label,
-                 fontsize=8.6, color=face if marker != "o" else palette.INK, ha="left")
-    return _png_uri(fig, tight=False)
+                ax.scatter([m], [y0], s=42, marker="^" if sign > 0 else "v", c=palette.SUCCESS_GREEN,
+                           edgecolors=palette.PAPER, linewidths=.8, zorder=6)
+                size, weight = 7.8, "normal"
+            level = next((i for i in range(3) if m - last_end[i] > 8.5), 2)
+            last_end[level] = m
+            ax.text(m, sign * (base + peak * .3 + level * step), f"{e['player']} {int(e['minute'])}'", ha="center",
+                    va="bottom" if sign > 0 else "top", fontsize=size, fontweight=weight, zorder=7,
+                    color=colour if kind == "goal" else palette.INK, path_effects=halo)
+    for i, (label, face, marker) in enumerate((("goal", palette.INK, "\u25cf"), ("yellow card", "#e0b12a", "\u25a0"),
+                                               ("red card", palette.CHARLTON_RED_DARK, "\u25a0"),
+                                               ("substitution (player on)", palette.SUCCESS_GREEN, "\u25b2"))):
+        fig.text(0.56 + i * 0.105, 0.012, f"{marker} {label}", fontsize=8, color=face, ha="left")
+    return _png_uri(fig, tight=False, dpi=200)
+
+
+def pe_stroke(colour: str):
+    import matplotlib.patheffects as pe
+    return pe.withStroke(linewidth=2.4, foreground=colour)
 
 
 # --------------------------------------------------------------------------- #
@@ -554,6 +570,5 @@ def overview_context(f7, f24_events: pd.DataFrame, avg_positions, to_adj, impect
             "subs": _sheet_rows(used, match_end),
             "unused": len(sheet.substitutes) - len(used),
         })
-    timeline_img = timeline_chart(
-        [(sh.name, sh.name.lower() == subject.lower(), timeline_events(sh)) for sh in ordered], match_end)
-    return {"team_sheets": cards, "timeline_img": timeline_img, "match_end_minute": match_end}
+    timeline_by_team = [(sh.name, sh.name.lower() == subject.lower(), timeline_events(sh)) for sh in ordered]
+    return {"team_sheets": cards, "timeline_by_team": timeline_by_team, "match_end_minute": match_end}

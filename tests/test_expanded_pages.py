@@ -25,8 +25,11 @@ def test_pages_are_numbered_contiguously_with_section_labels():
     assert plan["pages"]["contents"]["n"] == 1
     assert plan["pages"]["div_ip"]["label"] == "DIVIDER"
     assert plan["pages"]["ov_sheet"]["label"] == "PAGE 1/3"
-    assert plan["pages"]["ip_receptions"]["label"] == "PAGE 5/8"
+    assert plan["pages"]["net"]["label"] == "PAGE 1/8"
+    assert plan["pages"]["ip_receptions"]["label"] == "PAGE 4/8"
+    assert plan["pages"]["ip_player_threat"]["label"] == "PAGE 6/8"
     assert plan["pages"]["ip_shots"]["label"] == "PAGE 8/8"
+    assert "net_0" not in plan["pages"]
     assert plan["pages"]["oop_regains"]["label"] == "PAGE 3/3"
     assert plan["sections"]["in_possession"] == {"first": 6, "last": 14}
 
@@ -55,7 +58,9 @@ def _stub_context(tracked: bool, team_sheet: bool = True) -> dict:
         meta={"date": "19/09/2026", "competition": "Championship", "home_team": teams[1], "away_team": teams[0]},
         network={t: "" for t in teams},
         network_scale_threat=0.5,
-        side_by_team={t: {"avg_pos_in": "", "avg_pos_out": "", "avg_pos_in_lh": 0, "avg_pos_out_lh": 0, "entries": ""}
+        side_by_team={t: {"avg_pos_in": "", "avg_pos_out": "", "avg_pos_in_lh": 0, "avg_pos_out_lh": 0, "entries": "",
+                          "entries_style_split": {"through": 50.0, "over": 30.0, "around": 20.0, "n": 10,
+                                                  "successful": 5, "total": 8, "completion_pct": 62.5, "threat": .4}}
                       for t in teams},
         player_threat_ranking_totals={t: 0 for t in teams},
         big_chances={t: [] for t in teams},
@@ -71,18 +76,23 @@ def _stub_context(tracked: bool, team_sheet: bool = True) -> dict:
         section_info=section_info(teams[0], tracked, team_sheet),
         progression_img={t: "" for t in teams},
         progression_kpis={t: {"total": 10, "actions": 5} for t in teams},
+        threat_density_img={t: "" for t in teams},
+        threat_density_kpis={t: {"pxt": "1.00", "actions": 7} for t in teams},
         threat_zone_img={t: "" for t in teams},
         threat_zone_kpis={t: {"total": "1.00", "actions": 5} for t in teams},
         reception_ctx={t: {"img": "", "total": 3, "bypassed": 2,
-                           "categories": [{"label": "Out wide", "short": "Out wide", "colour": "#c0892d", "n": 3}],
-                           "players": [{"name": "One", "counts": [3], "bypassed": 2}]} for t in teams},
+                           "categories": [{"label": "Out wide", "n": 3}],
+                           "players": [{"name": "One", "receptions": 3, "bypassed": 2, "xt": 0.05}]} for t in teams},
+        player_threat_ctx={t: {"img": "", "created": "0.54", "passing": "0.39", "carrying": "0.15",
+                               "receiving": "0.44"} for t in teams},
         entry_givers_ctx={t: {"img": "", "n_final_third": 1, "n_box": 1} for t in teams},
+        flow_timeline_img="",
+        line_breaks_available=True,
         contents=build_contents(plan, teams[0], tracked, team_sheet),
     )
     if team_sheet:
         row = {"shirt": 1, "name": "A Player", "role": "GK", "minutes": 96, "marks": [{"kind": "goal", "text": "7'"}]}
         ctx.update(
-            timeline_img="",
             team_sheets=[{"name": t, "is_charlton": i == 0, "formation": "4-2-3-1", "lineup_img": "",
                           "starters": [row], "subs": [row], "unused": 2} for i, t in enumerate(teams)],
         )
@@ -128,7 +138,20 @@ def test_template_renders_the_in_possession_panels():
     env = Environment(loader=FileSystemLoader(str(TEMPLATES)), autoescape=select_autoescape(["html"]),
                       trim_blocks=True, lstrip_blocks=True)
     html = env.get_template("expanded.html.j2").render(**_stub_context(True))
-    for text in ("PASSING NETWORK & PROGRESSION", "Progression Zones", "Where Players Received The Ball",
-                 "Top receivers", "Threat Creation Zones", "Player Threat Ranking",
-                 "WHO GOT THE BALL THERE", "Threat Density &amp; Entries"):
-        assert text in html or text.replace("&amp;", "&") in html, text
+    for text in ("Passing Networks & Progression", "PROGRESSION", "Where Players Received The Ball", "Top receivers",
+                 "Threat Creation", "THREAT DENSITY", "THREAT BY ROLE ZONE", "Player Threat",
+                 "Final Third & Box Entries", "WHO GOT THE BALL THERE", "Match Flow, Territory & Timeline"):
+        assert text in html, text
+    assert "<b>50%</b> through" in html and "<b>30%</b> over" in html and "<b>20%</b> around" in html
+    assert "Match Timeline" not in html
+
+
+def test_entries_fall_back_to_completion_when_there_is_no_line_break_data():
+    env = Environment(loader=FileSystemLoader(str(TEMPLATES)), autoescape=select_autoescape(["html"]),
+                      trim_blocks=True, lstrip_blocks=True)
+    ctx = _stub_context(True)
+    ctx["line_breaks_available"] = False
+    html = env.get_template("expanded.html.j2").render(**ctx)
+    assert "through" not in html.split("Final Third & Box Entries")[1].split("WHO GOT THE BALL THERE")[0].replace(
+        "route · outcome · destination", "")
+    assert "<b>5/8</b> completed (62%)" in html or "<b>5/8</b> completed (63%)" in html

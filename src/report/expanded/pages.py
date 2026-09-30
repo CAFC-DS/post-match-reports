@@ -24,8 +24,7 @@ def _plan(tracked_shapes: bool, has_team_sheet: bool) -> list[tuple[str, str, bo
         ("ov_stats", "overview", False),
         ("ov_flow", "overview", False),
         ("div_ip", "in_possession", True),
-        ("net_0", "in_possession", False),
-        ("net_1", "in_possession", False),
+        ("net", "in_possession", False),
     ]
     if tracked_shapes:
         plan += [("shapes_0", "in_possession", False), ("shapes_1", "in_possession", False)]
@@ -34,7 +33,8 @@ def _plan(tracked_shapes: bool, has_team_sheet: bool) -> list[tuple[str, str, bo
     plan += [
         ("ip_receptions", "in_possession", False),
         ("ip_threat_zones", "in_possession", False),
-        ("ip_threat", "in_possession", False),
+        ("ip_player_threat", "in_possession", False),
+        ("ip_entries", "in_possession", False),
         ("ip_shots", "in_possession", False),
         ("div_oop", "out_of_possession", True),
         ("oop_pressure", "out_of_possession", False),
@@ -80,7 +80,7 @@ def build_page_plan(tracked_shapes: bool, has_team_sheet: bool = True) -> dict[s
 def section_info(subject: str, tracked_shapes: bool, has_team_sheet: bool) -> dict[str, dict[str, Any]]:
     """Title, blurb and sub-items per section: the single source for both the
     divider pages and the contents page."""
-    overview = ["Match stats & team performance", "Match flow & xG race"]
+    overview = ["Match stats & team performance", "Match flow, timeline & xG race"]
     if has_team_sheet:
         overview.insert(0, "Team sheet, lineups & timeline")
     return {
@@ -94,11 +94,12 @@ def section_info(subject: str, tracked_shapes: bool, has_team_sheet: bool) -> di
         "in_possession": {
             "num": 2, "title": "In Possession",
             "blurb": f"How both teams built play, how {subject} progressed threat, and how chance quality compared.",
-            "items": ["Passing networks & progression zones",
+            "items": ["Passing networks & progression",
                       "Team-by-team tracked phase shapes" if tracked_shapes else "Combined event-data average locations",
                       "Where players received the ball",
-                      "Threat creation zones & player threat",
-                      "Threat density & final-third / box entries",
+                      "Threat density & threat by role zone",
+                      "Player threat: passing, carrying, receiving",
+                      "Final-third & box entries",
                       "Comparative shot maps & xG sources"],
         },
         "out_of_possession": {
