@@ -8,6 +8,7 @@ season report does.
 
 from __future__ import annotations
 
+import re
 import resource
 import sys
 from pathlib import Path
@@ -438,14 +439,17 @@ def build_report(
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    suffix = (
-        ("_corner_zones" if zonal else "")
-        + ("_players" if players else "")
-        + ("_dark" if thm.name == "dark" else "")
+    # Charlton-perspective name, e.g. "Post Match Set Piece Report - Derby County (H)".
+    # Player tables are the default (bundle) variant; other variants get a label.
+    charlton_home = ctx.home_team == "Charlton Athletic"
+    opponent = ctx.away_team if charlton_home else ctx.home_team
+    opponent = " ".join(re.sub(r'[\\/:*?"<>|]+', " ", opponent).split())
+    variant = (
+        ("" if players else " - Team Tables")
+        + (" - Corner Zones" if zonal else "")
+        + (" - Dark" if thm.name == "dark" else "")
     )
-    slug = (
-        f"{ctx.home_team}_{ctx.away_team}_{ctx.date.strftime('%Y_%m_%d')}_set_piece_report{suffix}"
-    ).replace(" ", "_")
+    slug = f"Post Match Set Piece Report - {opponent} ({'H' if charlton_home else 'A'}){variant}"
 
     outputs: dict[str, Path] = {}
     if "html" in formats:

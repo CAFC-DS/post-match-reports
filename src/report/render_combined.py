@@ -17,7 +17,7 @@ import pandas as pd
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from src.dvms.loaders.fixtures import normalize_team_name, resolve_fixture, resolve_fixture_for_match
-from src.report import chart, chart_dvms, impect_cafcdb_source, metrics, metrics_combined, metrics_dvms, metrics_v2, palette, pitch
+from src.report import chart, chart_dvms, impect_cafcdb_source, metrics, metrics_combined, metrics_dvms, metrics_v2, naming, palette, pitch
 from src.report.metrics import STAT_GLOSS, STAT_ROWS
 from src.visualisation.badges import badge_data_uri
 
@@ -367,9 +367,12 @@ def render_report(impect_match_id: int, dvms_opta_match_id: str | None = None,
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    slug = (f"post_match_report_{context['meta']['charlton_team']}"
-            f"_v_{context['meta']['opponent_team']}"
-            f"_{context['meta']['date'].replace('/', '-')}").replace(" ", "_")
+    meta = context["meta"]
+    slug = naming.report_stem(
+        naming.BOARD,
+        meta["charlton_team"] if meta["venue"] == "Home" else meta["opponent_team"],
+        meta["opponent_team"] if meta["venue"] == "Home" else meta["charlton_team"],
+    )
 
     outputs: dict[str, Path] = {}
     if "html" in formats:

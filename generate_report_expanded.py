@@ -8,7 +8,6 @@ final PDF is persisted; the HTML used for Chromium rendering remains in memory.
 from __future__ import annotations
 
 import argparse
-import re
 import sys
 from pathlib import Path
 
@@ -32,7 +31,7 @@ def main() -> int:
 
     from src.dvms.loaders.fixtures import resolve_fixture, resolve_fixture_for_match
     from src.dvms.preprocess import is_preprocessed, preprocess_fixture
-    from src.report import impect_cafcdb_source, metrics
+    from src.report import impect_cafcdb_source, metrics, naming
     from src.report.render_combined import FixtureMismatchError, _assert_same_fixture
     from src.report.expanded.working import render_report
 
@@ -58,13 +57,7 @@ def main() -> int:
         preprocess_fixture(fixture.fixture_id, fixture.opta_match_id)
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    def slug(value: str) -> str:
-        return re.sub(r"[^A-Za-z0-9]+", "_", value).strip("_")
-
-    final_name = (
-        f"expanded_analyst_report_{slug(meta.home_team)}_v_{slug(meta.away_team)}_"
-        f"{meta.kickoff:%d-%m-%Y}.pdf"
-    )
+    final_name = naming.report_stem(naming.ANALYST, meta.home_team, meta.away_team) + ".pdf"
     final_path = args.output_dir / final_name
     render_report(
         args.impect_match_id,

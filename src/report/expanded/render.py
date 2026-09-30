@@ -31,7 +31,7 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from src.db.query_runner import QueryRunner
 from src.dvms.loaders.fixtures import resolve_fixture
-from src.report import chart, chart_dvms, metrics_dvms, palette, pitch
+from src.report import chart, chart_dvms, metrics_dvms, naming, palette, pitch
 from src.report import render as r
 from src.report import render_combined as rc
 from src.report.metrics import baseline as bl
@@ -645,8 +645,12 @@ def render_report(impect_match_id: int, dvms_opta_match_id: str, output_dir: Pat
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    slug = (f"expanded_analyst_report_{context['meta']['charlton_team']}"
-            f"_v_{context['meta']['opponent_team']}_{context['meta']['date'].replace('/', '-')}").replace(" ", "_")
+    meta = context["meta"]
+    slug = naming.report_stem(
+        naming.ANALYST,
+        meta["charlton_team"] if meta["venue"] == "Home" else meta["opponent_team"],
+        meta["opponent_team"] if meta["venue"] == "Home" else meta["charlton_team"],
+    )
 
     outputs: dict[str, Path] = {}
     if "html" in formats:
