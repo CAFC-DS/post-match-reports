@@ -91,3 +91,16 @@ def test_regain_charts_render_even_without_regains():
         summary = ooc.regain_summary(events, CHA)
         assert ooc.regain_map_chart(summary).startswith("data:image/png")
         assert ooc.regain_players_chart(summary).startswith("data:image/png")
+
+
+def test_second_ball_contests_union_started_and_won_and_flag_wins():
+    events = pd.DataFrame([
+        dict(eventId=1, squadName=CHA, SECOND_BALL_START=1.0, SECOND_BALL_WIN=0.0, startAdjCoordinatesX=1.0, startAdjCoordinatesY=1.0),
+        dict(eventId=2, squadName=CHA, SECOND_BALL_START=1.0, SECOND_BALL_WIN=1.0, startAdjCoordinatesX=2.0, startAdjCoordinatesY=1.0),
+        dict(eventId=3, squadName=CHA, SECOND_BALL_START=0.0, SECOND_BALL_WIN=1.0, startAdjCoordinatesX=3.0, startAdjCoordinatesY=1.0),
+        dict(eventId=4, squadName=OPP, SECOND_BALL_START=1.0, SECOND_BALL_WIN=0.0, startAdjCoordinatesX=4.0, startAdjCoordinatesY=1.0),
+    ])
+    out = ooc.second_ball_contests(events, CHA)
+    assert sorted(out["eventId"]) == [1, 2, 3] and out.set_index("eventId")["won"].to_dict() == {1: False, 2: True, 3: True}
+    assert ooc.second_ball_map_chart(out).startswith("data:image/png")
+    assert ooc.second_ball_map_chart(out.iloc[0:0]).startswith("data:image/png")

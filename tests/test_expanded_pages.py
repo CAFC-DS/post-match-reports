@@ -76,6 +76,7 @@ def _stub_context(tracked: bool, team_sheet: bool = True) -> dict:
         duel_map_img={t: {"AERIAL": "", "GROUND": ""} for t in teams},
         regain_img={t: "" for t in teams},
         regain_players_img={t: "" for t in teams},
+        second_ball_img={t: "" for t in teams},
         regain_ctx={t: {"n": 5, "counts": [1, 2, 2], "pcts": [20, 40, 40], "shots": 1, "shot_pct": 20, "losses": [3, 2, 1],
                         "losses_n": 6} for t in teams},
         second_ball_kpis={t: {k: 0 for k in ("won_n", "n", "baseline_avg", "baseline_delta", "baseline_n", "won_pct")} for t in teams},

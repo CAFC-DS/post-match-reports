@@ -130,11 +130,18 @@ def third_of(x: pd.Series) -> pd.Series:
     return pd.cut(pd.to_numeric(x, errors="coerce"), [-np.inf, *_THIRD_EDGES, np.inf], labels=False)
 
 
+def _flag(frame: pd.DataFrame, name: str) -> pd.Series:
+    """A 0/1 KPI column, all zeros when the column is missing."""
+    if name not in frame:
+        return pd.Series(0.0, index=frame.index)
+    return pd.to_numeric(frame[name], errors="coerce").fillna(0)
+
+
 def regains(events: pd.DataFrame, team: str) -> pd.DataFrame:
     """The team's ball wins with the third they happened in and whether the team shot within 15s of
     winning the ball without the opponent touching it in between (the report's shot-after-regain rule)."""
     t = events[events["squadName"] == team].sort_values("gameTimeInSec")
-    flag = lambda name: pd.to_numeric(t.get(name, 0), errors="coerce").fillna(0)
+    flag = lambda name: _flag(t, name)
     won = t[flag("BALL_WIN_NUMBER") == 1].copy()
     won["third"] = third_of(won["startAdjCoordinatesX"])
     won = won[won["third"].notna()]
@@ -154,7 +161,7 @@ def regains(events: pd.DataFrame, team: str) -> pd.DataFrame:
 
 def losses_by_third(events: pd.DataFrame, team: str) -> list[int]:
     t = events[events["squadName"] == team]
-    lost = t[pd.to_numeric(t.get("BALL_LOSS_NUMBER", 0), errors="coerce").fillna(0) == 1]
+    lost = t[_flag(t, "BALL_LOSS_NUMBER") == 1]
     thirds = third_of(lost["startAdjCoordinatesX"]).dropna().astype(int)
     return [int((thirds == i).sum()) for i in range(3)]
 
@@ -192,6 +199,29 @@ def regain_map_chart(summary: dict[str, Any]) -> str:
         if led.any():
             pitch_obj.scatter(x[led], y[led], ax=ax, s=110, facecolors="none", edgecolors=palette.INK, linewidth=1.5,
                               zorder=4)
+    return pitch._fig_to_uri(fig)
+
+
+def second_ball_contests(events: pd.DataFrame, team: str) -> pd.DataFrame:
+    """Contests the team started (SECOND_BALL_START) or won (SECOND_BALL_WIN), with a ``won`` flag."""
+    t = events[events["squadName"] == team]
+    flag = lambda name: _flag(t, name)
+    won = t[flag("SECOND_BALL_WIN") == 1]
+    contests = pd.concat([t[flag("SECOND_BALL_START") == 1], won]).drop_duplicates("eventId").copy()
+    contests["won"] = contests["eventId"].isin(set(won["eventId"]))
+    return contests
+
+
+def second_ball_map_chart(contests: pd.DataFrame) -> str:
+    """Won (dot) and lost (cross) second-ball contests, own goal at the bottom."""
+    pitch_obj, fig, ax = pitch._vertical_pitch((3.5, 5.2))
+    for won, marker, face in ((False, "X", palette.FAIL_REDGREY), (True, "o", palette.SUCCESS_GREEN)):
+        part = contests[contests["won"] == won]
+        if part.empty:
+            continue
+        x, y = pitch._to_pitch(part["startAdjCoordinatesX"], part["startAdjCoordinatesY"])
+        pitch_obj.scatter(x, y, ax=ax, s=34, color=face, marker=marker, edgecolors=palette.PAPER_2, linewidth=.7,
+                          alpha=.92, zorder=3)
     return pitch._fig_to_uri(fig)
 
 
@@ -239,6 +269,7 @@ def outofpossession_context(events: pd.DataFrame, duels: pd.DataFrame, pressure:
     regain = {t: regain_summary(events, t) for t in teams}
     return {
         "regain_img": {t: regain_map_chart(regain[t]) for t in teams},
+        "second_ball_img": {t: second_ball_map_chart(second_ball_contests(events, t)) for t in teams},
         "regain_players_img": {t: regain_players_chart(regain[t]) for t in teams},
         "regain_ctx": {t: {k: v for k, v in regain[t].items() if k not in ("frame", "players")} for t in teams},
         "duel_totals": {t: duel_totals(oriented, t) for t in teams},
