@@ -20,7 +20,7 @@ from src.report import metrics, palette, pitch
 
 GOAL_HALF_WIDTH = 3.66
 GOAL_HEIGHT = 2.44
-X_RANGE = 5.0            # metres either side of the goal centre that the chart shows
+X_RANGE = 6.0            # metres either side of the goal centre that the chart shows
 _ON_TARGET = ("Goal", "On target")
 _STYLE = {"Goal": dict(filled=True, ring=True), "On target": dict(filled=True, ring=False),
           "Off target": dict(filled=False, ring=False)}
@@ -50,8 +50,8 @@ def placement_summary(events: pd.DataFrame, team: str) -> dict[str, Any]:
 def shot_placement_chart(shots: pd.DataFrame, colour: str) -> str:
     """Goal face from behind the shooter: marker area = xG, filled = on target,
     ringed = goal, hollow = off target. Shots wide of the frame are pinned to its edge."""
-    z_top = 3.4
-    fig, ax = plt.subplots(figsize=(4.0, 2.76), facecolor=palette.PAPER_2)
+    z_top = 3.0
+    fig, ax = plt.subplots(figsize=(6.6, 1.72), facecolor=palette.PAPER_2)
     fig.subplots_adjust(0.005, 0.005, 0.995, 0.995)
     ax.set_facecolor(palette.PAPER_2)
     ax.set_xlim(-X_RANGE, X_RANGE); ax.set_ylim(-0.3, z_top); ax.set_aspect("equal"); ax.axis("off")
