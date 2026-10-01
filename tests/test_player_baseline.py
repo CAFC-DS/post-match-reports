@@ -88,6 +88,10 @@ def test_both_verdict_combines_the_two_comparisons():
     assert pb._both("level", "level") == "level" and pb._both("", "down") == "down" and pb._both("", "") == ""
 
 
+def passes_row_unrated(page):
+    return next(r for r in page["rows"] if r["label"] == "Passes completed")["cells"][1]["v_both"] == ""
+
+
 def test_players_context_is_charlton_only_with_a_page_per_position():
     history = pd.DataFrame([_row(1, 7, "MF", 90, PXT_ATTACK=0.9, SUCCESSFUL_PASSES=40.0),
                             _row(2, 7, "MF", 90, PXT_ATTACK=0.9, SUCCESSFUL_PASSES=40.0),
@@ -103,13 +107,14 @@ def test_players_context_is_charlton_only_with_a_page_per_position():
     assert pages["gk"]["columns"] == [] and pages["cf"]["rows"][0]["cells"] == []         # empty groups are kept
     mf = pages["mf"]
     assert [(c["name"], c["rated"]) for c in mf["columns"]] == [("Seven", True), ("Nine", False)]   # no Away players
-    assert [r["label"] for r in mf["rows"]][:3] == ["Passes completed", "Pass accuracy", "Threat created (xT)"]
+    labels = [r["label"] for r in mf["rows"]]
+    assert labels[:3] == ["Touches", "Passes completed", "Pass accuracy"] and "Threat created (xT)" in labels
     assert all(r["desc"] != "" for r in mf["rows"] if r["label"] == "Threat created (xT)")
-    passes = mf["rows"][0]["cells"][0]
+    passes = next(r for r in mf["rows"] if r["label"] == "Passes completed")["cells"][0]
     assert passes["text"] == "44" and passes["own"] == "40.0" and passes["v_both"] == "up"   # raw today, per-90 averages
     xt = next(r for r in mf["rows"] if r["label"] == "Threat created (xT)")["cells"][0]
     assert xt["text"] == "1.80" and xt["own"] == "0.90"
-    assert mf["rows"][0]["cells"][1]["v_both"] == ""                                       # 10 minutes: not rated
+    assert passes_row_unrated(mf)                                                          # 10 minutes: not rated
 
 
 def test_every_position_has_metrics_defined_and_actor_sql_covers_every_actor_column():
@@ -119,3 +124,38 @@ def test_every_position_has_metrics_defined_and_actor_sql_covers_every_actor_col
     assert needed <= set(pb.VALUE_COLUMNS)
     sql = pb._actor_sql("e.MATCH_ID in (1)", 2114)
     assert all(f'"{c}"' in sql for c in pb.ACTOR_COLUMNS)
+
+
+def test_players_are_grouped_by_their_natural_position_not_the_one_played_today():
+    history = pd.DataFrame([_row(1, 7, "CF", 90, SHOT_XG=0.4), _row(2, 7, "CF", 90, SHOT_XG=0.4),
+                            _row(1, 8, "MF", 90, squad=2), _row(1, 9, "MF", 90, squad=1)])
+    today = pd.DataFrame([_row(3, 7, "MF", 26, SHOT_XG=0.0), _row(3, 9, "MF", 90), _row(3, 11, "W", 30)])
+    groups = {g["group"]: g["players"] for g in pb.build_player_tables(history, today, 1)}
+    assert [p["playerId"] for p in groups["CF"]] == [7] and groups["CF"][0]["played_as"] == "Midfielders"
+    assert [p["playerId"] for p in groups["MF"]] == [9] and groups["MF"][0]["played_as"] == ""
+    assert [p["playerId"] for p in groups["W"]] == [11]                      # no history: today's position
+    assert pb.natural_group(history[history["playerId"] == 7]) == "CF" and pb.natural_group(history.iloc[0:0]) is None
+    xg = next(c for c in groups["CF"][0]["cells"] if c["key"] == "xg")
+    assert xg["league_value"] is not None                                    # compared with the forward average
+
+
+def test_physical_by_shirt_joins_tracking_to_the_team_sheet_and_filters_by_team():
+    class Match:
+        physical = pd.DataFrame([dict(opta_player_id=1, distance=10500.0, hsr=420.0, sprinting=90.0,
+                                      n_high_intensity_runs=41.0, top_speed=31.2),
+                                 dict(opta_player_id=2, distance=9000.0, hsr=300.0, sprinting=50.0,
+                                      n_high_intensity_runs=30.0, top_speed=29.0)])
+
+        class f7:
+            lineups = pd.DataFrame([dict(player_id="1", team_id="A", shirt_number=8),
+                                    dict(player_id="2", team_id="B", shirt_number=8)])
+
+        def side_of(self, team_id):
+            return team_id
+
+        def team_name_of(self, side):
+            return {"A": "Charlton Athletic", "B": "Cardiff City"}[side]
+
+    out = pb.physical_by_shirt(Match(), "Charlton Athletic")
+    assert list(out) == [8] and out[8]["distance"] == 10.5 and out[8]["top_speed"] == 31.2
+    assert pb.physical_by_shirt(type("M", (), {"physical": pd.DataFrame(), "f7": Match.f7})(), "Charlton Athletic") == {}

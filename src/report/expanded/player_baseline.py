@@ -28,11 +28,13 @@ KPI_COLUMNS = [
     "SUCCESSFUL_PASSES", "UNSUCCESSFUL_PASSES", "PXT_ATTACK", "BYPASSED_OPPONENTS", "BALL_WIN_NUMBER",
     "BALL_LOSS_NUMBER", "NUMBER_OF_PRESSES", "WON_GROUND_DUELS", "LOST_GROUND_DUELS", "WON_AERIAL_DUELS",
     "LOST_AERIAL_DUELS", "SHOT_XG", "SHOT_AT_GOAL_NUMBER", "SHOT_AT_GOAL_NUMBER_ON_TARGET", "EXPECTED_GOAL_ASSISTS",
-    "SHOT_ASSISTS", "SHOT_CREATING_ACTIONS", "SECOND_BALL_WIN", "GOALS", "ASSISTS",
+    "SHOT_ASSISTS", "SHOT_CREATING_ACTIONS", "SECOND_BALL_WIN", "GOALS", "ASSISTS", "PXT_PASS", "PXT_DRIBBLE", "PXT_REC",
+    "OFFENSIVE_TOUCHES", "DEFENSIVE_TOUCHES", "YELLOW_CARD", "FORCED_TURNOVERS",
 ]
 # Counts of what the player himself did, from the event rows he is the actor of.
 ACTOR_COLUMNS = ["SAVES", "CATCHES", "INTERCEPTIONS", "CLEARANCES", "BLOCKS", "FOULS", "CROSSES", "CROSSES_COMPLETED",
-                 "DRIBBLES", "DRIBBLES_COMPLETED"]
+                 "DRIBBLES", "DRIBBLES_COMPLETED", "PASSES_FINAL_THIRD", "PASSES_BOX", "RECEPTIONS", "RECEPTIONS_BTL",
+                 "LONG_PASSES", "LONG_PASSES_COMPLETED", "OFFSIDES", "GOAL_KICKS"]
 VALUE_COLUMNS = KPI_COLUMNS + ACTOR_COLUMNS
 
 POSITION_GROUPS = {
@@ -86,6 +88,27 @@ METRICS: dict[str, Metric] = {
     "crosses_done": Metric("Crosses completed", "Crosses that reached a team-mate", ("CROSSES_COMPLETED",)),
     "dribbles": Metric("Carries completed", "Times he carried the ball without losing it", ("DRIBBLES_COMPLETED",)),
     "second_balls": Metric("Second balls won", "Loose balls he won after a contest", ("SECOND_BALL_WIN",)),
+    "touches": Metric("Touches", "Times he had the ball at his feet", ("OFFENSIVE_TOUCHES", "DEFENSIVE_TOUCHES")),
+    "xt_pass": Metric("Threat from passes", "xT added by his passing", ("PXT_PASS",), raw_dec=2, avg_dec=2),
+    "xt_carry": Metric("Threat from carries", "xT added by carrying the ball", ("PXT_DRIBBLE",), raw_dec=2, avg_dec=2),
+    "xt_rec": Metric("Threat from receiving", "xT added by receiving the ball in good positions", ("PXT_REC",),
+                     raw_dec=2, avg_dec=2),
+    "passes_third": Metric("Passes into the final third", "Completed passes that took the ball into the final third",
+                           ("PASSES_FINAL_THIRD",)),
+    "passes_box": Metric("Passes into the box", "Completed passes into the opposition box", ("PASSES_BOX",)),
+    "receptions": Metric("Receptions", "Times he received the ball (as tagged by Impect)", ("RECEPTIONS",)),
+    "receptions_btl": Metric("Receptions between the lines", "Receptions between the opposition lines",
+                             ("RECEPTIONS_BTL",)),
+    "long_passes": Metric("Long passes completed", "Chipped and diagonal passes that reached a team-mate",
+                          ("LONG_PASSES_COMPLETED",)),
+    "long_pct": Metric("Long pass accuracy", "Share of his long passes that found a team-mate",
+                       ("LONG_PASSES_COMPLETED",), ("LONG_PASSES",), avg_dec=0),
+    "forced": Metric("Forced turnovers", "Presses after which the opponent lost the ball", ("FORCED_TURNOVERS",)),
+    "forced_pct": Metric("Press success rate", "Share of his presses that made the opponent lose the ball",
+                         ("FORCED_TURNOVERS",), ("NUMBER_OF_PRESSES",), avg_dec=0),
+    "offsides": Metric("Offsides", "Lower is better", ("OFFSIDES",), better=False),
+    "goal_kicks": Metric("Goal kicks", "Goal kicks taken", ("GOAL_KICKS",)),
+    "yellows": Metric("Yellow cards", "Lower is better", ("YELLOW_CARD",), better=False),
     "goals": Metric("Goals", "", ("GOALS",), raw_dec=0, avg_dec=2),
     "shots": Metric("Shots", "Attempts at goal", ("SHOT_AT_GOAL_NUMBER",)),
     "sot": Metric("Shots on target", "", ("SHOT_AT_GOAL_NUMBER_ON_TARGET",)),
@@ -96,16 +119,18 @@ METRICS: dict[str, Metric] = {
     "sca": Metric("Shot-creating actions", "Passes, carries and wins that led to a shot", ("SHOT_CREATING_ACTIONS",)),
 }
 GROUP_METRICS = {
-    "GK": ("saves", "catches", "passes", "pass_pct", "xt", "bypassed", "clearances", "losses"),
-    "CB": ("passes", "pass_pct", "bypassed", "interceptions", "clearances", "blocks", "duels", "duel_pct", "aerials",
-           "aerial_pct", "wins", "losses", "fouls"),
-    "FB": ("passes", "pass_pct", "crosses", "crosses_done", "xt", "bypassed", "dribbles", "duels", "interceptions",
-           "wins", "presses", "losses"),
-    "MF": ("passes", "pass_pct", "xt", "bypassed", "key_passes", "sca", "interceptions", "wins", "presses", "duels",
-           "second_balls", "losses"),
-    "W": ("goals", "shots", "sot", "xg", "xa", "key_passes", "sca", "xt", "dribbles", "crosses_done", "bypassed",
-          "presses", "losses"),
-    "CF": ("goals", "shots", "sot", "xg", "xa", "key_passes", "xt", "aerials", "duel_pct", "presses", "wins", "losses"),
+    "GK": ("saves", "catches", "passes", "pass_pct", "long_passes", "long_pct", "goal_kicks", "xt", "bypassed",
+           "clearances", "losses"),
+    "CB": ("touches", "passes", "pass_pct", "passes_third", "bypassed", "interceptions", "clearances", "blocks", "duels",
+           "duel_pct", "aerials", "aerial_pct", "wins", "losses", "fouls", "yellows"),
+    "FB": ("touches", "passes", "pass_pct", "passes_third", "passes_box", "crosses", "crosses_done", "xt", "bypassed",
+           "dribbles", "receptions_btl", "duels", "interceptions", "wins", "presses", "losses"),
+    "MF": ("touches", "passes", "pass_pct", "passes_third", "passes_box", "xt", "bypassed", "key_passes", "sca",
+           "receptions_btl", "interceptions", "wins", "presses", "forced", "duels", "second_balls", "losses"),
+    "W": ("touches", "goals", "shots", "sot", "xg", "xa", "key_passes", "sca", "xt", "dribbles", "passes_box",
+          "crosses_done", "receptions_btl", "bypassed", "presses", "forced", "losses"),
+    "CF": ("touches", "goals", "shots", "sot", "xg", "xa", "key_passes", "xt", "receptions", "receptions_btl", "aerials",
+           "duel_pct", "presses", "forced", "offsides", "wins", "losses", "yellows"),
 }
 MIN_SEASON_MINUTES = 90        # earlier minutes needed before a player's own average means anything
 MIN_MATCH_MINUTES = 20         # shorter appearances are shown but not rated
@@ -139,7 +164,11 @@ def group_of(position: str | None) -> str | None:
 
 
 def _kpi_sql(match_filter: str, iteration_id: int) -> str:
-    sums = ",\n  ".join(f'sum(coalesce(k.value:{c}::float, 0)) as "{c}"' for c in KPI_COLUMNS)
+    plain = [c for c in KPI_COLUMNS if c != "FORCED_TURNOVERS"]
+    sums = ",\n  ".join(f'sum(coalesce(k.value:{c}::float, 0)) as "{c}"' for c in plain)
+    # a press forces a turnover when the pressed event's action failed
+    sums += (",\n  sum(iff(coalesce(k.value:NUMBER_OF_PRESSES::float, 0) > 0 and e.RESULT = 'FAIL', 1, 0))"
+             ' as "FORCED_TURNOVERS"')
     return f"""
 select e.MATCH_ID as "matchId", k.value:playerId::int as "playerId", k.value:position::string as "position",
   {sums}
@@ -150,6 +179,12 @@ group by 1, 2, 3"""
 
 def _actor_sql(match_filter: str, iteration_id: int) -> str:
     cross = "e.ACTION_TYPE = 'PASS' and e.ACTION in ('HIGH_CROSS', 'LOW_CROSS')"
+    start, end = "e.START_DETAIL:pitchPosition::string", "e.END_DETAIL:pitchPosition::string"
+    done = "e.ACTION_TYPE = 'PASS' and e.RESULT = 'SUCCESS'"
+    into_third = (f"{done} and {end} in ('FINAL_THIRD', 'OPPONENT_BOX') "
+                  f"and coalesce({start}, '') not in ('FINAL_THIRD', 'OPPONENT_BOX')")
+    into_box = f"{done} and {end} = 'OPPONENT_BOX' and coalesce({start}, '') != 'OPPONENT_BOX'"
+    long_pass = "e.ACTION_TYPE = 'PASS' and e.ACTION in ('CHIPPED_PASS', 'DIAGONAL_PASS')"
     return f"""
 select e.MATCH_ID as "matchId", e.PLAYER_ID as "playerId",
   count_if(e.ACTION_TYPE = 'GK_SAVE') as "SAVES",
@@ -161,7 +196,15 @@ select e.MATCH_ID as "matchId", e.PLAYER_ID as "playerId",
   count_if({cross}) as "CROSSES",
   count_if({cross} and e.RESULT = 'SUCCESS') as "CROSSES_COMPLETED",
   count_if(e.ACTION_TYPE = 'DRIBBLE') as "DRIBBLES",
-  count_if(e.ACTION_TYPE = 'DRIBBLE' and e.RESULT = 'SUCCESS') as "DRIBBLES_COMPLETED"
+  count_if(e.ACTION_TYPE = 'DRIBBLE' and e.RESULT = 'SUCCESS') as "DRIBBLES_COMPLETED",
+  count_if({into_third}) as "PASSES_FINAL_THIRD",
+  count_if({into_box}) as "PASSES_BOX",
+  count_if(e.ACTION_TYPE = 'RECEPTION') as "RECEPTIONS",
+  count_if(e.ACTION_TYPE = 'RECEPTION' and e.ACTION = 'AVAILABILITY_BTL') as "RECEPTIONS_BTL",
+  count_if({long_pass}) as "LONG_PASSES",
+  count_if({long_pass} and e.RESULT = 'SUCCESS') as "LONG_PASSES_COMPLETED",
+  count_if(e.ACTION_TYPE = 'OFFSIDE') as "OFFSIDES",
+  count_if(e.ACTION_TYPE = 'GOAL_KICK') as "GOAL_KICKS"
 from CAFC_DB.IMPECT_RAW.EVENTS e
 where e.ITERATION_ID = {int(iteration_id)} and e.PLAYER_ID is not null and {match_filter}
 group by 1, 2"""
@@ -247,6 +290,39 @@ def verdict(value: float | None, average: float | None, higher_is_better: bool) 
     return "up" if (rel > 0) == higher_is_better else "down"
 
 
+def natural_group(history_rows: pd.DataFrame) -> str | None:
+    """The position group a player has spent most minutes in over the earlier matches, None without history."""
+    rows = history_rows[history_rows["group"].notna()]
+    if rows.empty:
+        return None
+    by_group = rows.groupby("group")["minutes"].sum()
+    return str(by_group.idxmax()) if float(by_group.max()) > 0 else None
+
+
+def physical_by_shirt(dvms_match: Any, team: str) -> dict[int, dict[str, float]]:
+    """Second Spectrum physical totals for ``team`` keyed by shirt number (the key Impect's MATCH_INFO shares)."""
+    phys, lineups = dvms_match.physical, dvms_match.f7.lineups
+    if phys is None or phys.empty or lineups.empty:
+        return {}
+    lu = lineups[["player_id", "team_id", "shirt_number"]].copy()
+    lu["player_id"] = lu["player_id"].astype(str)
+    merged = phys.assign(opta_player_id=phys["opta_player_id"].astype(str)).merge(
+        lu, left_on="opta_player_id", right_on="player_id", how="inner")
+    out: dict[int, dict[str, float]] = {}
+    for r in merged.itertuples():
+        if dvms_match.team_name_of(dvms_match.side_of(r.team_id)) != team or pd.isna(r.shirt_number):
+            continue
+        out[int(r.shirt_number)] = {"distance": float(r.distance) / 1000.0, "hsr": float(r.hsr),
+                                    "sprint": float(r.sprinting), "runs": float(r.n_high_intensity_runs),
+                                    "top_speed": float(r.top_speed)}
+    return out
+
+
+PHYSICAL_ROWS = (("distance", "Distance covered", "km", 1), ("hsr", "High-speed running", "m", 0),
+                 ("sprint", "Sprint distance", "m", 0), ("runs", "High-intensity runs", "", 0),
+                 ("top_speed", "Top speed", "km/h", 1))
+
+
 def build_player_tables(history: pd.DataFrame, today: pd.DataFrame, squad_id: int) -> list[dict[str, Any]]:
     """Groups of player rows for one squad in the reported match.
 
@@ -258,11 +334,12 @@ def build_player_tables(history: pd.DataFrame, today: pd.DataFrame, squad_id: in
     out: dict[str, list[dict[str, Any]]] = {g: [] for g in GROUP_ORDER}
     for pid, rows in mine.groupby("playerId"):
         main = rows.sort_values("minutes", ascending=False).iloc[0]
-        group = main["group"]
+        today_group = main["group"]
+        mine_before = history[(history["playerId"] == pid)]
+        group = natural_group(mine_before) or today_group
         if group not in out:
             continue
         minutes = float(rows["minutes"].max())
-        mine_before = history[(history["playerId"] == pid)]
         league = history[history["group"] == group]
         enough_history = float(mine_before["minutes"].sum()) >= MIN_SEASON_MINUTES
         rated = minutes >= MIN_MATCH_MINUTES
@@ -276,7 +353,8 @@ def build_player_tables(history: pd.DataFrame, today: pd.DataFrame, squad_id: in
                           "season": verdict(rate_today, season, m.better) if rated else "",
                           "league": verdict(rate_today, lg, m.better) if rated else "",
                           "season_value": season, "league_value": lg})
-        out[group].append({"playerId": int(pid), "minutes": round(minutes), "cells": cells})
+        out[group].append({"playerId": int(pid), "minutes": round(minutes), "cells": cells,
+                           "played_as": GROUP_LABELS.get(today_group, "") if today_group != group else ""})
     return [{"group": g, "label": GROUP_LABELS[g], "players": sorted(out[g], key=lambda p: -p["minutes"])}
             for g in GROUP_ORDER if out[g]]
 
@@ -286,7 +364,7 @@ def season_to_date(match_id: int, iteration_id: int, kickoff: str, env_path: str
     """Every player-match of the season up to and including ``match_id``, cached on disk.
 
     Matches are final once played, so only matches missing from the cache are queried."""
-    cache = CACHE_DIR / f"player_matches_{int(iteration_id)}_v3.parquet"
+    cache = CACHE_DIR / f"player_matches_{int(iteration_id)}_v4.parquet"
     have = pd.read_parquet(cache) if cache.exists() and not refresh else pd.DataFrame()
     connector = SnowflakeConnector(env_path)
     with connector.connection() as conn:
@@ -326,7 +404,8 @@ def _both(season: str, league: str) -> str:
     return "up" if total > 0 else ("down" if total < 0 else "level")
 
 
-def players_context(all_rows: pd.DataFrame, events: pd.DataFrame, team: str, match_id: int) -> dict[str, Any]:
+def players_context(all_rows: pd.DataFrame, events: pd.DataFrame, team: str, match_id: int,
+                    physical: dict[int, dict[str, float]] | None = None) -> dict[str, Any]:
     """Template context: one page per position group for ``team``'s players. Players are the columns
     (starters then subs by minutes), the group's metrics are the rows, and each player has three cells:
     what he did today (raw), his own per-90 average and the league per-90 average for the position.
@@ -350,7 +429,8 @@ def players_context(all_rows: pd.DataFrame, events: pd.DataFrame, team: str, mat
             shirt = today.loc[today["playerId"] == p["playerId"], "shirt"]
             columns.append({"name": str(names.get(p["playerId"], "")).split()[-1] or str(p["playerId"]),
                             "shirt": int(shirt.iloc[0]) if len(shirt) and pd.notna(shirt.iloc[0]) else "",
-                            "minutes": p["minutes"], "rated": p["minutes"] >= MIN_MATCH_MINUTES})
+                            "minutes": p["minutes"], "rated": p["minutes"] >= MIN_MATCH_MINUTES,
+                            "played_as": p["played_as"]})
         rows = []
         for k, key in enumerate(keys):
             cells = []
@@ -360,5 +440,13 @@ def players_context(all_rows: pd.DataFrame, events: pd.DataFrame, team: str, mat
                               "league": _format(c["league_value"], key), "v_own": c["season"], "v_league": c["league"],
                               "v_both": _both(c["season"], c["league"])})
             rows.append({"label": METRICS[key].label, "desc": METRICS[key].desc, "cells": cells})
-        pages.append({"key": group.lower(), "label": GROUP_LABELS[group], "columns": columns, "rows": rows})
+        phys_rows = []
+        if physical:
+            for key, label, unit, dec in PHYSICAL_ROWS:
+                vals = [physical.get(c["shirt"], {}).get(key) if c["shirt"] != "" else None for c in columns]
+                if any(v is not None for v in vals):
+                    phys_rows.append({"label": label, "unit": unit,
+                                      "cells": ["–" if v is None else f"{v:.{dec}f}" for v in vals]})
+        pages.append({"key": group.lower(), "label": GROUP_LABELS[group], "columns": columns, "rows": rows,
+                      "physical": phys_rows})
     return {"player_pages": pages, "player_baseline_matches": int(history["matchId"].nunique())}
