@@ -1047,7 +1047,7 @@ def build_context(impect_match_id: int, dvms_match_id: str | None = None) -> dic
             events,(subject,opponent),impect_match_id)
     except Exception as error:   # the tables are an extra: say why they are missing rather than fail the report
         print(f"warning: player tables skipped ({type(error).__name__}: {error})")
-    has_players=bool(players_ctx.get("player_tables"))
+    has_players=bool(players_ctx.get("player_pages"))
     page_plan=build_page_plan(tracked,has_sheet,has_players)
     context.update({
         "generated_date":dt.date.today().strftime("%d %B %Y"),

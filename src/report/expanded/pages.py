@@ -21,7 +21,7 @@ def _plan(tracked_shapes: bool, has_team_sheet: bool, has_players: bool) -> list
     if has_team_sheet:
         plan.append(("ov_sheet", "overview", False))
     if has_players:
-        plan += [("ov_players_0", "overview", False), ("ov_players_1", "overview", False)]
+        plan += [(f"ov_players_{g.lower()}", "overview", False) for g in ("GK", "CB", "FB", "MF", "W", "CF")]
     plan += [
         ("ov_stats", "overview", False),
         ("ov_flow", "overview", False),
@@ -84,7 +84,7 @@ def section_info(subject: str, tracked_shapes: bool, has_team_sheet: bool,
     divider pages and the contents page."""
     overview = ["Match stats & team performance", "Match flow, timeline & xG race"]
     if has_players:
-        overview.insert(0, "Player performance vs season & league averages")
+        overview.insert(0, "Player performance by position vs season & league averages")
     if has_team_sheet:
         overview.insert(0, "Team sheet, lineups & timeline")
     return {

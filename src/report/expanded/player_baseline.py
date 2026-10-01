@@ -238,27 +238,54 @@ def _format(value: float | None, key: str) -> str:
     return f"{value:.{decimals}f}" + ("%" if METRICS[key][2] is not None else "")
 
 
+def _both(season: str, league: str) -> str:
+    """One verdict for the value cell from its two comparisons: up / down / level, 'mixed' when they disagree."""
+    scores = [{"up": 1, "down": -1, "level": 0}[v] for v in (season, league) if v]
+    if not scores:
+        return ""
+    if 1 in scores and -1 in scores:
+        return "mixed"
+    total = sum(scores)
+    return "up" if total > 0 else ("down" if total < 0 else "level")
+
+
 def players_context(all_rows: pd.DataFrame, events: pd.DataFrame, teams: tuple[str, str], match_id: int) -> dict[str, Any]:
-    """Template context: per team, position groups of players with formatted values and verdict arrows."""
+    """Template context: one page per position group, both teams on it. Players are the columns
+    (the subject's first), the group's metrics are the rows, and each player has three cells:
+    today's value, his own earlier average and the league average, tinted by the comparison."""
     today = all_rows[all_rows["matchId"] == match_id]
     if today.empty:
         return {}
     history = all_rows[(all_rows["matchId"] != match_id) & (all_rows["kickoff"] < today["kickoff"].iloc[0])]
     names = events.dropna(subset=["playerId"]).drop_duplicates("playerId").set_index("playerId")["playerName"]
-    tables: dict[str, list[dict[str, Any]]] = {}
+    by_team: dict[str, dict[str, list[dict[str, Any]]]] = {}
     for team in teams:
         squad = events.loc[events["squadName"] == team, "squadId"].dropna()
         if squad.empty:
-            continue
-        groups = build_player_tables(history, today, int(squad.iloc[0]))
-        for g in groups:
-            keys = GROUP_METRICS[next(k for k, v in GROUP_LABELS.items() if v == g["label"])]
-            for p in g["players"]:
-                p["name"] = str(names.get(p["playerId"], "")).split()[-1] or str(p["playerId"])
+            return {}
+        by_team[team] = {g["group"]: g["players"] for g in build_player_tables(history, today, int(squad.iloc[0]))}
+
+    pages = []
+    for group in GROUP_ORDER:
+        keys = GROUP_METRICS[group]
+        columns, players = [], []
+        for i, team in enumerate(teams):
+            for p in by_team[team].get(group, []):
                 shirt = today.loc[today["playerId"] == p["playerId"], "shirt"]
-                p["shirt"] = int(shirt.iloc[0]) if len(shirt) and pd.notna(shirt.iloc[0]) else ""
-                p["cells"] = [{"text": _format(c["value"], k), "season": c["season"], "league": c["league"],
-                               "season_text": _format(c["season_value"], k), "league_text": _format(c["league_value"], k)}
-                              for c, k in zip(p["cells"], keys)]
-        tables[team] = groups
-    return {"player_tables": tables, "player_baseline_matches": int(history["matchId"].nunique())}
+                columns.append({"team": team, "is_subject": i == 0,
+                                "name": str(names.get(p["playerId"], "")).split()[-1] or str(p["playerId"]),
+                                "shirt": int(shirt.iloc[0]) if len(shirt) and pd.notna(shirt.iloc[0]) else "",
+                                "minutes": p["minutes"], "rated": p["minutes"] >= MIN_MATCH_MINUTES})
+                players.append(p)
+        rows = [{"label": "Minutes", "cells": [{"text": f"{p['minutes']}'", "own": "", "league": "", "v_own": "",
+                                                "v_league": "", "v_both": ""} for p in players], "is_minutes": True}]
+        for k, key in enumerate(keys):
+            cells = []
+            for p in players:
+                c = p["cells"][k]
+                cells.append({"text": _format(c["value"], key), "own": _format(c["season_value"], key),
+                              "league": _format(c["league_value"], key), "v_own": c["season"], "v_league": c["league"],
+                              "v_both": _both(c["season"], c["league"])})
+            rows.append({"label": METRICS[key][0], "cells": cells, "is_minutes": False})
+        pages.append({"key": group.lower(), "label": GROUP_LABELS[group], "columns": columns, "rows": rows})
+    return {"player_pages": pages, "player_baseline_matches": int(history["matchId"].nunique())}

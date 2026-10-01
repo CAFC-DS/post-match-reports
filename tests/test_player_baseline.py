@@ -69,3 +69,31 @@ def test_build_player_tables_rates_against_own_history_and_the_league_group():
     xt = lambda p: next(c for c in p["cells"] if c["key"] == "xt")
     assert xt(groups[0]["players"][0])["season"] == "up" and xt(groups[0]["players"][0])["league"] == "up"
     assert xt(groups[0]["players"][1])["season"] == "" and xt(groups[0]["players"][1])["league"] == ""
+
+
+def test_both_verdict_combines_the_two_comparisons():
+    assert pb._both("up", "up") == "up" and pb._both("down", "down") == "down"
+    assert pb._both("up", "down") == "mixed" and pb._both("up", "level") == "up"
+    assert pb._both("level", "level") == "level" and pb._both("", "down") == "down" and pb._both("", "") == ""
+
+
+def test_players_context_has_a_page_per_position_with_both_teams_as_columns():
+    history = pd.DataFrame([_row(1, 7, "MF", 90, PXT_ATTACK=0.9), _row(2, 7, "MF", 90, PXT_ATTACK=0.9),
+                            _row(1, 8, "MF", 90, squad=2), _row(2, 8, "MF", 90, squad=2)])
+    today = pd.DataFrame([_row(3, 7, "MF", 90, PXT_ATTACK=1.8), _row(3, 9, "MF", 10, squad=1),
+                          _row(3, 8, "MF", 90, squad=2, PXT_ATTACK=0.0)])
+    events = pd.DataFrame([dict(playerId=7, playerName="A Seven", squadName="Home", squadId=1),
+                           dict(playerId=9, playerName="C Nine", squadName="Home", squadId=1),
+                           dict(playerId=8, playerName="B Eight", squadName="Away", squadId=2)])
+    ctx = pb.players_context(pd.concat([history, today], ignore_index=True), events, ("Home", "Away"), 3)
+    pages = {p["key"]: p for p in ctx["player_pages"]}
+    assert list(pages) == ["gk", "cb", "fb", "mf", "w", "cf"] and ctx["player_baseline_matches"] == 2
+    assert pages["gk"]["columns"] == [] and pages["cf"]["rows"][0]["cells"] == []         # empty groups are kept
+    mf = pages["mf"]
+    assert [(c["name"], c["is_subject"], c["rated"]) for c in mf["columns"]] == [
+        ("Seven", True, True), ("Nine", True, False), ("Eight", False, True)]
+    assert [r["label"] for r in mf["rows"]] == ["Minutes", "Pass %", "Threat /90", "Opp. bypassed /90", "Ball wins /90",
+                                                 "Pressures /90", "Ball losses /90"]
+    threat = next(r for r in mf["rows"] if r["label"] == "Threat /90")["cells"]
+    assert threat[0]["text"] == "1.80" and threat[0]["own"] == "0.90" and threat[0]["v_both"] == "up"
+    assert threat[1]["v_both"] == ""                                                       # 10 minutes: not rated
