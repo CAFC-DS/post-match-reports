@@ -1,12 +1,12 @@
 import pandas as pd
 
 from src.report import metrics
-from src.report.expanded import working
+from src.report.expanded import charts, working
 from src.report import impect_cafcdb_source
 
 
 def test_player_threat_ranking_uses_positive_open_play_threat(monkeypatch):
-    monkeypatch.setattr(working, "_uri_fixed", lambda figure: "chart")
+    monkeypatch.setattr(charts, "_uri_fixed", lambda figure: "chart")
     events = pd.DataFrame(
         [
             ("PASS", "OPEN_PLAY", 0.20, "Miles Leaburn", "Charlton"),
@@ -18,7 +18,7 @@ def test_player_threat_ranking_uses_positive_open_play_threat(monkeypatch):
         columns=["actionType", "action", "PXT_ATTACK", "playerName", "squadName"],
     )
 
-    chart, totals = working._player_threat_ranking(events, "Charlton", "Opponent")
+    chart, totals = charts._player_threat_ranking(events, "Charlton", "Opponent")
 
     assert chart == "chart"
     assert totals == {"Charlton": "0.25", "Opponent": "0.10"}
@@ -49,7 +49,7 @@ def test_starters_network_adds_undirected_pair_threat_and_drops_substitutes():
         ],
     )
 
-    result = working._starters_only_network(net, events, "Charlton")
+    result = charts._starters_only_network(net, events, "Charlton")
 
     assert result.nodes["playerName"].tolist() == ["A One", "B Two"]
     assert result.nodes["surname"].tolist() == ["AO", "BT"]

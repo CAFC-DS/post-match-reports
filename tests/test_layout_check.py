@@ -2,7 +2,7 @@ import os
 
 import pytest
 
-from src.report.expanded import layout_check, working
+from src.report.expanded import browser, layout_check
 
 PAGE = """<!doctype html><html><head><style>
 @page{size:A4 landscape;margin:0}body{margin:0}
@@ -14,8 +14,8 @@ PAGE = """<!doctype html><html><head><style>
 @pytest.fixture(scope="module")
 def chrome():
     try:
-        return working.resolve_chrome(None)
-    except working.BrowserConfigurationError:
+        return browser.resolve_chrome(None)
+    except browser.BrowserConfigurationError:
         pytest.skip("no Chrome available")
 
 

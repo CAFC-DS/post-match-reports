@@ -95,7 +95,7 @@ def pressure_heatmap(pressure: pd.DataFrame, team: str, vmax: float) -> tuple[st
     (so both teams can be drawn on one scale)."""
     from matplotlib.colors import PowerNorm
 
-    from src.report.expanded.working import _THERMAL_CMAP, _heatmap_pitch_kwargs
+    from src.report.expanded.charts import _THERMAL_CMAP, _heatmap_pitch_kwargs
 
     p = pressure[pressure["squadName"] == team]
     x = -pd.to_numeric(p["startAdjCoordinatesX"], errors="coerce")
