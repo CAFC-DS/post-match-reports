@@ -26,20 +26,17 @@ def test_placed_shots_drop_blocked_shots_and_shots_without_a_target_point():
     assert shooting.placed_shots(events.drop(columns=["targetY", "targetZ"]), CHA).empty
 
 
-def test_placement_summary_counts_post_shot_xg_and_lists_on_target_and_woodwork():
+def test_placement_summary_counts_post_shot_xg_and_woodwork():
     events = _shots([
-        dict(SHOT_AT_GOAL_NUMBER_SUCCESS=1.0, result="SUCCESS", SHOT_XG=0.24, POSTSHOT_XG=0.6, playerName="A Campbell",
-             gameTime="28:10"),
-        dict(SHOT_AT_GOAL_NUMBER_ON_TARGET=1.0, SHOT_XG=0.3, POSTSHOT_XG=0.2, playerName="B Kelman", gameTime="70:00"),
-        dict(woodwork="RIGHT_POST", targetY=-3.7, targetZ=1.0, SHOT_XG=0.1, playerName="C Grant"),
-        dict(targetY=6.0, targetZ=3.0, playerName="D Wide"),                # off target: counted, not listed
+        dict(SHOT_AT_GOAL_NUMBER_SUCCESS=1.0, result="SUCCESS", SHOT_XG=0.24, POSTSHOT_XG=0.6),
+        dict(SHOT_AT_GOAL_NUMBER_ON_TARGET=1.0, SHOT_XG=0.3, POSTSHOT_XG=0.2),
+        dict(woodwork="RIGHT_POST", targetY=-3.7, targetZ=1.0),
+        dict(targetY=6.0, targetZ=3.0),
     ])
     out = shooting.placement_summary(events, CHA)
     assert (out["placed"], out["on_target"], out["goals"], out["woodwork"]) == (4, 2, 1, 1)
     assert abs(out["xgot"] - 0.8) < 1e-9
-    assert [r["player"] for r in out["rows"]] == ["Campbell", "Kelman", "Grant"]       # by xGOT, woodwork last
-    assert [r["result"] for r in out["rows"]] == ["Goal", "Saved", "Post"]
-    assert out["rows"][0]["minute"] == "28'" and out["rows"][0]["type"] == "Mid range"
+    assert shooting.placement_summary(events.iloc[0:0], CHA)["xgot"] == 0.0
 
 
 def test_charts_and_context_render_for_both_teams_even_without_shots():

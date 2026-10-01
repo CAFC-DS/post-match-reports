@@ -12,9 +12,9 @@ TEMPLATES = Path(__file__).resolve().parents[1] / "src" / "report" / "expanded" 
 def test_page_counts():
     # The recovered report was 16 / 15 pages; the contents page, the team-sheet
     # page (needs DVMS lineups) and the receptions / threat pages add three.
-    assert build_page_plan(True)["total"] == 20
-    assert build_page_plan(False)["total"] == 19
-    assert build_page_plan(True, has_team_sheet=False)["total"] == 19
+    assert build_page_plan(True)["total"] == 19
+    assert build_page_plan(False)["total"] == 18
+    assert build_page_plan(True, has_team_sheet=False)["total"] == 18
     assert "ov_sheet" not in build_page_plan(True, has_team_sheet=False)["pages"]
 
 
@@ -25,20 +25,20 @@ def test_pages_are_numbered_contiguously_with_section_labels():
     assert plan["pages"]["contents"]["n"] == 1
     assert plan["pages"]["div_ip"]["label"] == "DIVIDER"
     assert plan["pages"]["ov_sheet"]["label"] == "PAGE 1/3"
-    assert plan["pages"]["net"]["label"] == "PAGE 1/8"
-    assert plan["pages"]["ip_receptions"]["label"] == "PAGE 4/8"
-    assert plan["pages"]["ip_threat_zones"]["label"] == "PAGE 5/8"
-    assert plan["pages"]["ip_shots"]["label"] == "PAGE 7/8"
-    assert plan["pages"]["ip_shot_placement"]["label"] == "PAGE 8/8"
+    assert plan["pages"]["net"]["label"] == "PAGE 1/7"
+    assert plan["pages"]["ip_receptions"]["label"] == "PAGE 4/7"
+    assert plan["pages"]["ip_threat_zones"]["label"] == "PAGE 5/7"
+    assert plan["pages"]["ip_shots"]["label"] == "PAGE 7/7"
+    assert "ip_shot_placement" not in plan["pages"]
     assert "net_0" not in plan["pages"] and "ip_player_threat" not in plan["pages"]
     assert plan["pages"]["oop_regains"]["label"] == "PAGE 3/3"
-    assert plan["sections"]["in_possession"] == {"first": 6, "last": 14}
+    assert plan["sections"]["in_possession"] == {"first": 6, "last": 13}
 
 
 def test_untracked_layout_merges_the_shape_pages():
     plan = build_page_plan(False)
     assert "shapes" in plan["pages"] and "shapes_0" not in plan["pages"]
-    assert plan["pages"]["ip_shots"]["label"] == "PAGE 6/7"
+    assert plan["pages"]["ip_shots"]["label"] == "PAGE 6/6"
 
 
 def _stub_context(tracked: bool, team_sheet: bool = True) -> dict:
@@ -88,9 +88,7 @@ def _stub_context(tracked: bool, team_sheet: bool = True) -> dict:
                                "receiving": "0.44"} for t in teams},
         entry_givers_ctx={t: {"img": "", "n_final_third": 1, "n_box": 1} for t in teams},
         placement_img={t: "" for t in teams},
-        placement_ctx={t: {"placed": 4, "on_target": 2, "goals": 1, "woodwork": 0, "xgot": "0.80",
-                           "rows": [{"minute": "28'", "player": "Campbell", "type": "Mid range", "xg": .24, "xgot": .45,
-                                     "result": "Goal"}]} for t in teams},
+        placement_ctx={t: {"placed": 4, "on_target": 2, "goals": 1, "woodwork": 0, "xgot": "0.80"} for t in teams},
         flow_timeline_img="",
         timeline_img="",
         line_breaks_available=True,
@@ -149,7 +147,7 @@ def test_template_renders_the_in_possession_panels():
     for text in ("Passing Networks & Progression", "PROGRESSION", "3 defenders", "Where Players Received The Ball",
                  "Who received it", "Threat Creation & Player Threat", "Threat density", "Threat by role zone",
                  "Player threat", "Final Third & Box Entries", "WHO GOT THE BALL THERE",
-                 "Match Flow & Territory", "Shot Placement", "Shots on target &amp; woodwork"):
+                 "Match Flow & Territory", "Shot Placement &amp; Biggest Chances"):
         assert text in html, text
     assert "<b>50%</b> through" in html and "<b>30%</b> over" in html and "<b>20%</b> around" in html
     assert html.count("Match Timeline") == 1          # one timeline panel: on the team-sheet page

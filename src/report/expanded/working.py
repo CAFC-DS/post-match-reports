@@ -1210,8 +1210,9 @@ def build_context(impect_match_id: int, dvms_match_id: str | None = None) -> dic
         "event_counts":{"pressures":pressure_kpis["pressure_n"],"regains":regain_kpis["n"],"second_balls":second_ball_kpis["n"],"losses":transition_kpis["high_losses_n"]},
         "big_chances":{
             team:[{"minute":str(r.gameTime).split(':')[0]+"'","player":str(r.playerName).split()[-1],"xg":float(r.SHOT_XG),
+                   "xgot":(float(r.POSTSHOT_XG) if str(r.category) in ("Goal","On target") else None),
                    "result":("OFF TARGET" if str(r.category) == "Other" else str(r.category).upper())}
-                  for r in metrics.shot_events(events).loc[lambda x:x.squadName==team].nlargest(7,"SHOT_XG").itertuples()]
+                  for r in metrics.shot_events(events).loc[lambda x:x.squadName==team].nlargest(6,"SHOT_XG").itertuples()]
             for team in teams
         },
         "font_faces_css": _fonts.embedded_css(),

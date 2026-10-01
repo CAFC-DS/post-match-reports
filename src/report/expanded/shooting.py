@@ -20,12 +20,7 @@ from src.report import metrics, palette, pitch
 
 GOAL_HALF_WIDTH = 3.66
 GOAL_HEIGHT = 2.44
-X_RANGE = 6.0            # metres either side of the goal centre that the chart shows
-SHOT_TYPES = {
-    "CLOSE_RANGE_SHOT": "Close range", "MID_RANGE_SHOT": "Mid range", "LONG_RANGE_SHOT": "Long range",
-    "HEADER": "Header", "PENALTY_KICK": "Penalty", "DIRECT_FREE_KICK": "Free kick",
-    "ONE_VS_ONE_AGAINST_GK": "One v one", "OPEN_GOAL_SHOT": "Open goal", "CORNER": "Corner",
-}
+X_RANGE = 5.0            # metres either side of the goal centre that the chart shows
 _ON_TARGET = ("Goal", "On target")
 _STYLE = {"Goal": dict(filled=True, ring=True), "On target": dict(filled=True, ring=False),
           "Off target": dict(filled=False, ring=False)}
@@ -42,48 +37,21 @@ def placed_shots(events: pd.DataFrame, team: str) -> pd.DataFrame:
     return shots
 
 
-def goal_zones(on_target: pd.DataFrame) -> list[list[dict[str, int]]]:
-    """On-target shots by goal zone: two rows (high, low) of three (left, centre, right) as seen from behind
-    the shooter, each with its shot count and how many of them scored."""
-    third = GOAL_HALF_WIDTH * 2 / 3
-    zones = [[{"n": 0, "goals": 0} for _ in range(3)] for _ in range(2)]
-    for r in on_target.itertuples():
-        col = 0 if r.targetY > third / 2 else (2 if r.targetY < -third / 2 else 1)       # +y is the attacker's left
-        row = 0 if r.targetZ >= GOAL_HEIGHT / 2 else 1
-        zones[row][col]["n"] += 1
-        zones[row][col]["goals"] += int(r.category == "Goal")
-    return zones
-
-
-def placement_summary(events: pd.DataFrame, team: str, top: int = 10) -> dict[str, Any]:
-    """Counts, post-shot xG and the table of shots that were on target or hit the woodwork."""
+def placement_summary(events: pd.DataFrame, team: str) -> dict[str, Any]:
+    """Counts of placed shots and the post-shot xG of the ones on target."""
     shots = placed_shots(events, team)
     wood = shots["woodwork"].notna() if "woodwork" in shots else pd.Series(False, index=shots.index)
     on = shots["category"].isin(_ON_TARGET)
-    xgot = float(shots.loc[on, "POSTSHOT_XG"].sum()) if len(shots) else 0.0
-    table = shots[on | wood].copy()
-    table["xgot"] = table["POSTSHOT_XG"].where(table["category"].isin(_ON_TARGET), 0.0)
-    table = table.sort_values(["xgot", "SHOT_XG"], ascending=False).head(top)
-    rows = []
-    for r in table.itertuples():
-        rows.append({
-            "minute": f"{int(metrics.minute_num(str(r.gameTime)))}'",
-            "player": str(r.playerName).split()[-1],
-            "type": SHOT_TYPES.get(str(r.action), str(r.action).replace("_", " ").capitalize()),
-            "xg": float(r.SHOT_XG), "xgot": float(r.xgot),
-            "result": "Goal" if r.category == "Goal" else ("Post" if pd.notna(getattr(r, "woodwork", None))
-                                                           else "Saved"),
-        })
-    return {"zones": goal_zones(shots[on]), "placed": int(len(shots)), "on_target": int(on.sum()),
+    return {"placed": int(len(shots)), "on_target": int(on.sum()),
             "goals": int((shots["category"] == "Goal").sum()), "woodwork": int(wood.sum()),
-            "xgot": xgot, "rows": rows}
+            "xgot": float(shots.loc[on, "POSTSHOT_XG"].sum()) if len(shots) else 0.0}
 
 
 def shot_placement_chart(shots: pd.DataFrame, colour: str) -> str:
     """Goal face from behind the shooter: marker area = xG, filled = on target,
     ringed = goal, hollow = off target. Shots wide of the frame are pinned to its edge."""
-    z_top = 3.6
-    fig, ax = plt.subplots(figsize=(6.6, 2.45), facecolor=palette.PAPER_2)
+    z_top = 3.4
+    fig, ax = plt.subplots(figsize=(4.0, 2.76), facecolor=palette.PAPER_2)
     fig.subplots_adjust(0.005, 0.005, 0.995, 0.995)
     ax.set_facecolor(palette.PAPER_2)
     ax.set_xlim(-X_RANGE, X_RANGE); ax.set_ylim(-0.3, z_top); ax.set_aspect("equal"); ax.axis("off")
@@ -100,7 +68,7 @@ def shot_placement_chart(shots: pd.DataFrame, colour: str) -> str:
         # +y is the attacker's left; seen from behind the shooter that is the left of the picture
         px = np.clip(-shots["targetY"].astype(float).to_numpy(), -X_RANGE + .3, X_RANGE - .3)
         pz = np.clip(shots["targetZ"].astype(float).to_numpy(), 0.0, z_top - .3)
-        size = 22 + 900 * shots["SHOT_XG"].astype(float).to_numpy()
+        size = 16 + 650 * shots["SHOT_XG"].astype(float).to_numpy()
         cats = shots["category"].to_numpy()
         for cat in ("Off target", "On target", "Goal"):
             m = cats == cat
@@ -114,7 +82,7 @@ def shot_placement_chart(shots: pd.DataFrame, colour: str) -> str:
         for xi, zi, name, cat in zip(px, pz, shots["playerName"], cats):
             if cat == "Goal":
                 ax.annotate(str(name).split()[-1], (xi, zi), xytext=(0, -12), textcoords="offset points", ha="center",
-                            va="top", fontsize=7.6, fontweight="bold", color=palette.INK, path_effects=halo, zorder=6)
+                            va="top", fontsize=7, fontweight="bold", color=palette.INK, path_effects=halo, zorder=6)
     return pitch._fig_to_uri(fig)
 
 
