@@ -359,49 +359,6 @@ def _player_threat_ranking(events: pd.DataFrame, charlton: str, opponent: str) -
     return _uri_fixed(fig), totals
 
 
-def _regains_panel(events: pd.DataFrame, team: str, baseline: pd.DataFrame) -> tuple[str, dict[str, Any], pd.Series]:
-    """Opposition-half ball wins, ringed where the team shot within 15s of
-    winning it -- *and* kept the ball the whole way there (no opponent
-    touch between the regain and the shot). Without the continuity check
-    this over-counted (11 of 50 vs. the reference's 8 of 50): a shot that
-    happens to fall inside the 15s window after an unrelated, intervening
-    loss-and-re-regain isn't really that regain's shot. With it, n=8
-    matches the reference exactly. The prior version also had no half
-    filter at all -- 'opposition-half regains' was actually every ball win
-    anywhere on the pitch."""
-    t = events.loc[events["squadName"] == team].sort_values("gameTimeInSec")
-    flag = lambda name: pd.to_numeric(t.get(name, 0), errors="coerce").fillna(0)
-    regains = t.loc[(flag("BALL_WIN_NUMBER") == 1) & (pd.to_numeric(t["startAdjCoordinatesX"], errors="coerce") > 0)]
-    shot_times = t.loc[flag("SHOT_AT_GOAL_NUMBER") == 1, "gameTimeInSec"].to_numpy()
-    all_sorted = events.sort_values("gameTimeInSec")
-
-    def led_to_shot(rt: float) -> bool:
-        window = shot_times[(shot_times >= rt) & (shot_times <= rt + 15)]
-        if not len(window):
-            return False
-        shot_t = window[0]
-        between = all_sorted.loc[(all_sorted["gameTimeInSec"] > rt) & (all_sorted["gameTimeInSec"] < shot_t)]
-        return not (between["squadName"] != team).any()
-
-    led = regains["gameTimeInSec"].map(led_to_shot) if len(regains) else pd.Series(dtype=bool)
-    pitch_obj, fig, ax = pitch._half_pitch((5.6, 7.4))
-    x, y = pitch._to_pitch(regains["startAdjCoordinatesX"], regains["startAdjCoordinatesY"])
-    pitch_obj.scatter(x, y, ax=ax, s=32, color=palette.CHARLTON_RED, alpha=0.75, zorder=2)
-    if led.any():
-        rx, ry = pitch._to_pitch(regains.loc[led, "startAdjCoordinatesX"], regains.loc[led, "startAdjCoordinatesY"])
-        pitch_obj.scatter(rx, ry, ax=ax, s=90, facecolors="none", edgecolors=palette.CHARLTON_RED, linewidth=1.6, zorder=3)
-    n = len(regains)
-    baseline_avg = float(baseline["opposition_half_regains"].mean())
-    kpis = {
-        "n": n, "shot_n": int(led.sum()) if n else 0, "shot_pct": round(int(led.sum()) / n * 100) if n else 0,
-        "baseline_avg": round(baseline_avg, 1), "baseline_delta": f"{n - baseline_avg:+.1f}",
-        "baseline_n": len(baseline),
-    }
-    top6 = regains.groupby("playerName").size().sort_values(ascending=False).head(6)
-    top6.index = [str(i).split()[-1] for i in top6.index]
-    return _uri(fig), kpis, top6
-
-
 def _second_ball_panel(events: pd.DataFrame, team: str, baseline: pd.DataFrame) -> tuple[str, dict[str, Any]]:
     """Second-ball contests this team was involved in, as the union of the
     events where they started the contest (SECOND_BALL_START) and where
@@ -441,7 +398,7 @@ def _second_ball_panel(events: pd.DataFrame, team: str, baseline: pd.DataFrame) 
 def _transition_response_map(events: pd.DataFrame, team: str, opponent: str) -> tuple[str, dict[str, Any]]:
     """High losses (attacking-half turnovers) plotted with two overlays:
     a black ring where the opponent shot within 15s of that specific loss
-    (with no opponent touch in between -- see _regains_panel for why that
+    (with no opponent touch in between -- see outofpossession.regains for why that
     continuity check matters), and a green triangle at the *regain's own
     location* for every one of the team's losses -- not just the high
     ones -- that the team won back within 5s.
@@ -1064,8 +1021,7 @@ def build_context(impect_match_id: int, dvms_match_id: str | None = None) -> dic
     networks={team:_local_passing_network_map(nets[team],mx,mt,met) for team in teams}
     network_scale_threat=round(mt,2)
     baseline=sb.build_season_baseline(charlton=subject)
-    regain_img,regain_kpis,recovery_top6=_regains_panel(events,subject,baseline)
-    second_ball_img,second_ball_kpis=_second_ball_panel(events,subject,baseline)
+    second_balls={team:_second_ball_panel(events,team,baseline) for team in teams}
 
     home,away=context["meta"]["home_team"],context["meta"]["away_team"]
     team_stats=metrics.team_stats(events,home,away)
@@ -1119,15 +1075,12 @@ def build_context(impect_match_id: int, dvms_match_id: str | None = None) -> dic
         "player_threat_ranking_img":player_threat_ranking_img,
         "player_threat_ranking_totals":player_threat_ranking_totals,
         **ooc_ctx,
-        "regain_img":regain_img,"regain_kpis":regain_kpis,
-        "second_ball_img":second_ball_img,"second_ball_kpis":second_ball_kpis,
+        "second_ball_img":{t:v[0] for t,v in second_balls.items()},"second_ball_kpis":{t:v[1] for t,v in second_balls.items()},
         "transition_img":transition_img,"transition_kpis":transition_kpis,
         "duel_aerial_bars_img":_duel_bars_by_type(
             duel_involvement,subject,opponent,"AERIAL",events=events),
         "duel_ground_bars_img":_duel_bars_by_type(
             duel_involvement,subject,opponent,"GROUND",events=events),
-        "recovery_player_img":_bars(recovery_top6.index.tolist(),recovery_top6.values.tolist(),palette.CHARLTON_RED),
-        "event_counts":{"pressures":ooc_ctx["pressing_kpis"][subject]["n"],"regains":regain_kpis["n"],"second_balls":second_ball_kpis["n"],"losses":transition_kpis["high_losses_n"]},
         "big_chances":{
             team:[{"minute":str(r.gameTime).split(':')[0]+"'","player":str(r.playerName).split()[-1],"xg":float(r.SHOT_XG),
                    "xgot":(float(r.POSTSHOT_XG) if str(r.category) in ("Goal","On target") else None),

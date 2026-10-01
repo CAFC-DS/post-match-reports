@@ -12,9 +12,9 @@ TEMPLATES = Path(__file__).resolve().parents[1] / "src" / "report" / "expanded" 
 def test_page_counts():
     # The recovered report was 16 / 15 pages; the contents page, the team-sheet
     # page (needs DVMS lineups) and the receptions / threat pages add three.
-    assert build_page_plan(True)["total"] == 19
-    assert build_page_plan(False)["total"] == 18
-    assert build_page_plan(True, has_team_sheet=False)["total"] == 18
+    assert build_page_plan(True)["total"] == 20
+    assert build_page_plan(False)["total"] == 19
+    assert build_page_plan(True, has_team_sheet=False)["total"] == 19
     assert "ov_sheet" not in build_page_plan(True, has_team_sheet=False)["pages"]
 
 
@@ -32,7 +32,8 @@ def test_pages_are_numbered_contiguously_with_section_labels():
     assert "ip_shot_placement" not in plan["pages"]
     assert "net_0" not in plan["pages"] and "ip_player_threat" not in plan["pages"]
     assert "oop_duel_maps" not in plan["pages"]
-    assert plan["pages"]["oop_regains"]["label"] == "PAGE 3/3"
+    assert plan["pages"]["oop_regains"]["label"] == "PAGE 3/4"
+    assert plan["pages"]["oop_second_balls"]["label"] == "PAGE 4/4"
     assert plan["sections"]["in_possession"] == {"first": 6, "last": 13}
 
 
@@ -73,8 +74,12 @@ def _stub_context(tracked: bool, team_sheet: bool = True) -> dict:
         pressing_img={t: "" for t in teams},
         duel_totals={t: {k: {"won": 3, "total": 5, "pct": 60} for k in ("all", "AERIAL", "GROUND")} for t in teams},
         duel_map_img={t: {"AERIAL": "", "GROUND": ""} for t in teams},
-        regain_kpis={k: 0 for k in ("n", "baseline_avg", "baseline_delta", "baseline_n", "shot_pct", "shot_n")},
-        second_ball_kpis={k: 0 for k in ("won_n", "n", "baseline_avg", "baseline_delta", "baseline_n", "won_pct")},
+        regain_img={t: "" for t in teams},
+        regain_players_img={t: "" for t in teams},
+        regain_ctx={t: {"n": 5, "counts": [1, 2, 2], "pcts": [20, 40, 40], "shots": 1, "shot_pct": 20, "losses": [3, 2, 1],
+                        "losses_n": 6} for t in teams},
+        second_ball_img={t: "" for t in teams},
+        second_ball_kpis={t: {k: 0 for k in ("won_n", "n", "baseline_avg", "baseline_delta", "baseline_n", "won_pct")} for t in teams},
         transition_kpis={k: 0 for k in ("high_losses_n", "counterpress_n", "shot_n", "shot_pct")},
         stat_rows_expanded=[],
         match_highlights=[],
