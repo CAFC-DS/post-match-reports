@@ -928,15 +928,15 @@ def _match_highlights(match_values: dict[str, float], baseline: pd.DataFrame,
     ]
 
 
-def _xg_race(events: pd.DataFrame, teams: list[str]) -> str:
+def _xg_race(events: pd.DataFrame, teams: list[str], compact: bool = False) -> str:
     """Cumulative non-penalty xG step chart. X-axis ticks match the Match
     Flow / Territory chart directly above it on the same page (0'/15'/30'/HT/
     60'/75'/90', chart_dvms.territory_chart's own convention), not
     matplotlib's default 0/20/40/60/80 -- the reference's two charts on this
     page share one axis convention."""
-    font=10.5                      # same type scale as the match-flow chart above it
-    fig,ax=plt.subplots(figsize=(16.0,3.5),facecolor=palette.PAPER)
-    fig.subplots_adjust(left=0.07,right=0.99,top=0.96,bottom=0.15)
+    font,size=(9.0,(13.0,1.25)) if compact else (10.5,(16.0,3.5))      # same type scale as the match-flow chart above it
+    fig,ax=plt.subplots(figsize=size,facecolor=palette.PAPER)
+    fig.subplots_adjust(left=0.07,right=0.99,top=0.96,bottom=0.3 if compact else 0.15)
     ax.set_facecolor(palette.PAPER)
     cum_by_team = {}
     for team,color in zip(teams,[palette.CHARLTON_RED,palette.OPPONENT_GREY]):
@@ -1090,18 +1090,8 @@ def _transition_speed_mps(events: pd.DataFrame, team: str, dvms_match) -> float:
     return total_gain / total_time if total_time else 0.0
 
 
-_SUMMARY_KPIS = [("possession_pct", "Possession"), ("shots", "Shots"), ("shots_on_target", "On target"),
-                 ("non_penalty_xg", "xG"), ("pass_accuracy_pct", "Pass accuracy"),
-                 ("touches_in_opposition_box", "Box touches")]
-
-
-def _summary_kpis(stats: pd.DataFrame, subject: str, opponent: str) -> list[dict[str, str]]:
-    """Headline numbers for the overview's summary strip, subject first."""
-    return [{"label": label, "subject": _fmt_expanded(key, float(stats.loc[subject, key])),
-             "opponent": _fmt_expanded(key, float(stats.loc[opponent, key]))} for key, label in _SUMMARY_KPIS]
-
-
-def _flow_timeline(events: pd.DataFrame, dvms_match, timeline_by_team, subject: str, opponent: str) -> str:
+def _flow_timeline(events: pd.DataFrame, dvms_match, timeline_by_team, subject: str, opponent: str,
+                   compact: bool = False) -> str:
     """Territory flow (tracking) or Impect momentum (fallback) with goals, cards
     and substitutions marked, for the overview's match-flow panel."""
     if timeline_by_team is None:      # no DVMS team sheet: use the Impect-inferred goals, cards and subs
@@ -1119,10 +1109,10 @@ def _flow_timeline(events: pd.DataFrame, dvms_match, timeline_by_team, subject: 
             wave=None
     if wave is not None:
         return overview_mod.flow_timeline_chart(wave["minute"],wave["territory_m"],timeline_by_team,
-                                                y_label="Territory (m from halfway)")
+                                                y_label="Territory (m from halfway)", compact=compact)
     momentum=metrics.momentum(events,subject,opponent)
     return overview_mod.flow_timeline_chart(momentum["minute"],momentum["momentum"],timeline_by_team,
-                                            y_label="Net threat (rolling)")
+                                            y_label="Net threat (rolling)", compact=compact)
 
 
 def build_context(impect_match_id: int, dvms_match_id: str | None = None) -> dict[str, Any]:
@@ -1179,7 +1169,7 @@ def build_context(impect_match_id: int, dvms_match_id: str | None = None) -> dic
             dvms_match.f7,dvms_match.f24.events,dvms_match.avg_positions,
             lambda x,y:metrics_dvms._metres_to_adj(x,y,dvms_match.meta),events,subject)
     has_sheet=bool(overview_ctx)
-    flow_timeline_img=_flow_timeline(events,dvms_match,overview_ctx.get("timeline_by_team"),subject,opponent)
+    flow_timeline_img=_flow_timeline(events,dvms_match,overview_ctx.get("timeline_by_team"),subject,opponent,compact=bool(overview_ctx.get("team_sheets")))
     page_plan=build_page_plan(tracked,has_sheet)
     context.update({
         "generated_date":dt.date.today().strftime("%d %B %Y"),
@@ -1193,9 +1183,9 @@ def build_context(impect_match_id: int, dvms_match_id: str | None = None) -> dic
         "stat_rows_expanded":stat_rows_expanded,
         "performance_img":_performance_wheel(charlton_match_values,baseline),
         "match_highlights":_match_highlights(charlton_match_values,baseline,subject,opponent,speed_subject,speed_opponent),
-        "xg_race_img":_xg_race(events,teams),
+        "xg_race_img":_xg_race(events,teams,compact=bool(overview_ctx.get("team_sheets"))),
         "threat_density_img":threat_density_img,"threat_density_kpis":threat_density_kpis,
-        "flow_timeline_img":flow_timeline_img,"summary_kpis":_summary_kpis(team_stats,subject,opponent),
+        "flow_timeline_img":flow_timeline_img,
         "entries_kpis":entries_kpis,
         "chance_source_img":chance_source_img,"chance_source_kpis":chance_source_kpis,
         "player_threat_ranking_img":player_threat_ranking_img,

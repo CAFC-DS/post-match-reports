@@ -470,7 +470,7 @@ def _merge_substitutions(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def flow_timeline_chart(x, y, timeline_by_team: list[tuple[str, bool, list[dict[str, Any]]]], *,
-                        y_label: str = "Territory (m)") -> str:
+                        y_label: str = "Territory (m)", compact: bool = False) -> str:
     """Match flow and timeline in one chart.
 
     The rolling territory wave (``y`` > 0 is the subject's attacking half, red;
@@ -484,7 +484,8 @@ def flow_timeline_chart(x, y, timeline_by_team: list[tuple[str, bool, list[dict[
     a size, and only goals are bold.
 
     ``timeline_by_team`` is ``[(team name, is_subject, events), ...]`` as
-    returned by :func:`timeline_events`.
+    returned by :func:`timeline_events`. ``compact`` draws the shorter version
+    used when the chart shares a page with the team sheets.
     """
     import matplotlib.patheffects as pe
     import matplotlib.pyplot as plt
@@ -493,13 +494,15 @@ def flow_timeline_chart(x, y, timeline_by_team: list[tuple[str, bool, list[dict[
 
     from src.report import palette
 
-    font = 10.5
+    # compact: a 13 x 2.4 in figure shown at ~80% (about 7.3pt print), three label levels
+    font, size, levels = (9.0, (13.0, 2.4), 3) if compact else (10.5, (16.0, 4.6), 4)
     x_max = X_AXIS_MAX
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
     peak = max(float(np.abs(y).max()) if len(y) else 0.0, 5.0)
-    fig, ax = plt.subplots(figsize=(16.0, 4.6), facecolor=palette.PAPER)
-    fig.subplots_adjust(left=0.07, right=0.99, top=0.98, bottom=0.12)
+    ylim_scale = 2.6 if compact else 2.9
+    fig, ax = plt.subplots(figsize=size, facecolor=palette.PAPER)
+    fig.subplots_adjust(left=0.07, right=0.99, top=0.98, bottom=0.22 if compact else 0.12)
     ax.set_facecolor(palette.PAPER)
     ax.fill_between(x, y, 0, where=y >= 0, interpolate=True, color=palette.CHARLTON_RED, alpha=.9, linewidth=0, zorder=3)
     ax.fill_between(x, y, 0, where=y <= 0, interpolate=True, color=palette.OPPONENT_GREY, alpha=.85, linewidth=0, zorder=3)
@@ -507,7 +510,7 @@ def flow_timeline_chart(x, y, timeline_by_team: list[tuple[str, bool, list[dict[
     ax.axhline(0, color=palette.INK, linewidth=1.0, zorder=5)
     ax.axvline(45, color=palette.HAIR, linewidth=1.0, linestyle=(0, (3, 3)), zorder=1)
     ax.set_xlim(0, x_max)
-    ax.set_ylim(-peak * 2.9, peak * 2.9)
+    ax.set_ylim(*(-peak * ylim_scale, peak * ylim_scale))
     ax.set_xticks(X_AXIS_TICKS)
     ax.set_xticklabels(X_AXIS_LABELS)
     ax.tick_params(labelsize=font, colors=palette.MUTED, length=0)
@@ -516,12 +519,12 @@ def flow_timeline_chart(x, y, timeline_by_team: list[tuple[str, bool, list[dict[
     ax.spines["bottom"].set_color(palette.HAIR)
 
     halo = [pe.withStroke(linewidth=2.6, foreground=palette.PAPER)]
-    base, step = peak * 1.3, peak * .34
-    char_w = .56                       # width of one character in minutes at this size
+    base, step = (peak * .95, peak * .3) if compact else (peak * 1.3, peak * .34)
+    char_w = .56 * (font / 10.5) * (16.0 / size[0])      # width of one character in minutes at this size
     for lane, (team, is_subject, events) in enumerate(timeline_by_team):
         sign = 1 if lane == 0 else -1
         colour = palette.CHARLTON_RED if is_subject else palette.OPPONENT_GREY
-        right_edge = [-99.0] * 4       # where each label level is already occupied up to
+        right_edge = [-99.0] * levels       # where each label level is already occupied up to
         for e in _merge_substitutions(events):
             m, kind = min(float(e["minute"]), x_max - 1.6), e["kind"]
             y0 = sign * base
@@ -537,16 +540,16 @@ def flow_timeline_chart(x, y, timeline_by_team: list[tuple[str, bool, list[dict[
             text = f"{e['player']} {int(e['minute'])}'"
             half = len(text) * char_w / 2
             centre = min(max(m, half + .3), x_max - half - .3)       # keep the label inside the axes
-            level = next((i for i in range(4) if centre - half > right_edge[i] + .8), 3)
+            level = next((i for i in range(levels) if centre - half > right_edge[i] + .8), levels - 1)
             right_edge[level] = centre + half
-            ax.text(centre, sign * (base + peak * .36 + level * step), text, ha="center",
+            ax.text(centre, sign * (base + peak * (.3 if compact else .36) + level * step), text, ha="center",
                     va="bottom" if sign > 0 else "top", fontsize=font, zorder=7, path_effects=halo,
                     fontweight="bold" if kind == "goal" else "normal",
                     color=colour if kind == "goal" else palette.INK)
     for i, (label, face, marker) in enumerate((("goal", palette.INK, "\u25cf"), ("yellow card", "#c99a1c", "\u25a0"),
                                                ("red card", palette.CHARLTON_RED_DARK, "\u25a0"),
                                                ("substitution (player on)", palette.SUCCESS_GREEN, "\u25b2"))):
-        fig.text(0.56 + i * 0.11, 0.012, f"{marker} {label}", fontsize=font, color=face, ha="left")
+        fig.text((0.34 if compact else 0.56) + i * (0.16 if compact else 0.11), 0.012, f"{marker} {label}", fontsize=font, color=face, ha="left")
     return _png_uri(fig, tight=False, dpi=200)
 
 

@@ -18,11 +18,10 @@ def _plan(tracked_shapes: bool, has_team_sheet: bool) -> list[tuple[str, str, bo
         ("contents", "front", True),
         ("div_overview", "overview", True),
     ]
-    if has_team_sheet:
-        plan.append(("ov_sheet", "overview", False))
+    # With a team sheet the match flow and xG race share its page; without one they get their own.
+    plan += [("ov_sheet", "overview", False), ("ov_stats", "overview", False)] if has_team_sheet else \
+            [("ov_stats", "overview", False), ("ov_flow", "overview", False)]
     plan += [
-        ("ov_stats", "overview", False),
-        ("ov_flow", "overview", False),
         ("div_ip", "in_possession", True),
         ("net", "in_possession", False),
     ]
@@ -79,14 +78,14 @@ def build_page_plan(tracked_shapes: bool, has_team_sheet: bool = True) -> dict[s
 def section_info(subject: str, tracked_shapes: bool, has_team_sheet: bool) -> dict[str, dict[str, Any]]:
     """Title, blurb and sub-items per section: the single source for both the
     divider pages and the contents page."""
-    overview = ["Match stats & team performance", "Match flow, timeline & xG race"]
-    if has_team_sheet:
-        overview.insert(0, "Team sheet, lineups & timeline")
+    overview = ["Match stats & team performance"]
+    overview.insert(0, "Match flow, xG race, team sheet & lineups" if has_team_sheet
+                    else "Match flow, timeline & xG race")
     return {
         "overview": {
             "num": 1, "title": "Overview",
-            "blurb": f"Who played, match stats, {subject}'s season-relative performance profile, "
-                     "and how the game unfolded." if has_team_sheet else
+            "blurb": f"How the game unfolded, who played, match stats and {subject}'s season-relative "
+                     "performance profile." if has_team_sheet else
                      f"Match stats, {subject}'s season-relative performance profile, and how the game unfolded.",
             "items": overview,
         },
