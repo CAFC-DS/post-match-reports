@@ -115,7 +115,7 @@ def pressing_chart(summary: dict[str, Any], colour: str) -> str:
     return inpossession._bar_panels_chart(
         [("PRESSURES", summary["top_pressures"], str(summary["n"])),
          ("FORCED TURNOVERS", summary["top_forced"], str(summary["forced"]))],
-        colour, _PRESS_SLOTS, (7.6, 3.7), label_size=10.2)
+        colour, _PRESS_SLOTS, (7.6, 3.5), label_size=10.2)
 
 
 # --------------------------------------------------------------------------- #
