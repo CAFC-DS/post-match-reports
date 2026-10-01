@@ -115,7 +115,7 @@ def pressing_chart(summary: dict[str, Any], colour: str) -> str:
     return inpossession._bar_panels_chart(
         [("PRESSURES", summary["top_pressures"], str(summary["n"])),
          ("FORCED TURNOVERS", summary["top_forced"], str(summary["forced"]))],
-        colour, _PRESS_SLOTS, (7.6, 3.0), label_size=10.2)
+        colour, _PRESS_SLOTS, (7.6, 3.7), label_size=10.2)
 
 
 # --------------------------------------------------------------------------- #
@@ -138,7 +138,4 @@ def outofpossession_context(events: pd.DataFrame, duels: pd.DataFrame, pressure:
         "pressing_kpis": {t: {"n": s["n"], "forced": s["forced"], "forced_pct": s["forced_pct"],
                               "opp_half": s["opp_half"], "opp_third": s["opp_third"],
                               "per_min": round(s["n"] / 90, 1)} for t, s in summaries.items()},
-        "most_involved": {t: " · ".join(f"{_surname(n)} {c}" for n, c in
-                                        oriented[oriented["squadName"] == t].groupby("playerName").size()
-                                        .sort_values(ascending=False).head(3).items()) for t in teams},
     }

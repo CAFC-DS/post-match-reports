@@ -37,7 +37,6 @@ def _plan(tracked_shapes: bool, has_team_sheet: bool) -> list[tuple[str, str, bo
         ("ip_shots", "in_possession", False),
         ("div_oop", "out_of_possession", True),
         ("oop_pressure", "out_of_possession", False),
-        ("oop_duel_maps", "out_of_possession", False),
         ("oop_duels", "out_of_possession", False),
         ("oop_regains", "out_of_possession", False),
         ("div_trans", "transition", True),
@@ -104,7 +103,7 @@ def section_info(subject: str, tracked_shapes: bool, has_team_sheet: bool) -> di
         "out_of_possession": {
             "num": 3, "title": "Out of Possession",
             "blurb": f"Where {subject} engaged, competed and recovered the ball.",
-            "items": ["Pressing: heatmaps, rankings & forced turnovers", "Duel maps & player duel performance", "Opposition-half regains & second balls"],
+            "items": ["Pressing & duel maps, best pressers", "Player duel performance", "Opposition-half regains & second balls"],
         },
         "transition": {
             "num": 4, "title": "Transition",
