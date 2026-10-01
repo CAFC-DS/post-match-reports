@@ -1044,7 +1044,7 @@ def build_context(impect_match_id: int, dvms_match_id: str | None = None) -> dic
         kickoff=pd.Timestamp(events["dateTime"].iloc[0]).tz_convert("UTC").strftime("%Y-%m-%dT%H:%M:%SZ")
         players_ctx=player_baseline.players_context(
             player_baseline.season_to_date(impect_match_id,int(events["iterationId"].iloc[0]),kickoff),
-            events,(subject,opponent),impect_match_id)
+            events,subject,impect_match_id)
     except Exception as error:   # the tables are an extra: say why they are missing rather than fail the report
         print(f"warning: player tables skipped ({type(error).__name__}: {error})")
     has_players=bool(players_ctx.get("player_pages"))

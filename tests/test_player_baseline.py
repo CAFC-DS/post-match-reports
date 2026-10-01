@@ -33,7 +33,7 @@ def test_verdict_uses_a_five_percent_band_and_respects_lower_is_better():
 
 
 def _row(match, player, group, minutes, squad=1, **kpis):
-    base = {c: 0.0 for c in pb.KPI_COLUMNS}
+    base = {c: 0.0 for c in pb.VALUE_COLUMNS}
     return {"matchId": match, "playerId": player, "position": "CENTRAL_MIDFIELD", "group": group, "squadId": squad,
             "minutes": minutes, "shirt": player, "kickoff": f"2026-09-{match:02d}", **{**base, **kpis}}
 
@@ -42,7 +42,7 @@ def test_collapse_positions_sums_kpis_and_keeps_the_busiest_position():
     frame = pd.DataFrame([
         {**_row(1, 7, "MF", 90, SUCCESSFUL_PASSES=30.0), "position": "CENTRAL_MIDFIELD"},
         {**_row(1, 7, "W", 90, SUCCESSFUL_PASSES=5.0), "position": "LEFT_WINGER"},
-    ]).drop(columns="group")
+    ]).drop(columns=["group"] + pb.ACTOR_COLUMNS)
     out = pb.collapse_positions(frame)
     assert len(out) == 1 and out.iloc[0]["SUCCESSFUL_PASSES"] == 35.0
     assert out.iloc[0]["position"] == "CENTRAL_MIDFIELD" and out.iloc[0]["group"] == "MF"
@@ -54,21 +54,32 @@ def test_rate_pools_numerators_and_minutes_and_percentages_use_their_denominator
     assert pb._rate(frame, "pass_pct") == 50.0 / 60.0 * 100
     assert abs(pb._rate(frame, "xt") - 0.9 / 135 * 90) < 1e-9
     assert pb._rate(frame.iloc[0:0], "xt") is None
+    assert pb._today(frame.iloc[[0]], "passes") == 40.0           # today is the raw count, not per 90
+    assert pb._today(frame.iloc[[0]], "pass_pct") == 40 / 50 * 100
 
 
-def test_build_player_tables_rates_against_own_history_and_the_league_group():
+def test_build_player_tables_shows_raw_today_but_rates_the_per_90_equivalent():
     history = pd.DataFrame([
-        _row(1, 7, "MF", 90, PXT_ATTACK=0.9), _row(2, 7, "MF", 90, PXT_ATTACK=0.9),         # player: 0.9 / 90
-        _row(1, 8, "MF", 90, PXT_ATTACK=0.0, squad=2), _row(2, 8, "MF", 90, PXT_ATTACK=0.0, squad=2),
+        _row(1, 7, "MF", 90, BALL_WIN_NUMBER=6.0), _row(2, 7, "MF", 90, BALL_WIN_NUMBER=6.0),    # 6 wins per 90
+        _row(1, 8, "MF", 90, squad=2, BALL_WIN_NUMBER=6.0), _row(2, 8, "MF", 90, squad=2, BALL_WIN_NUMBER=6.0),
     ])
-    today = pd.DataFrame([_row(3, 7, "MF", 90, PXT_ATTACK=1.8),                                # twice his average
-                          _row(3, 9, "MF", 10, PXT_ATTACK=0.5),                                # cameo: not rated
-                          _row(3, 8, "MF", 90, squad=2)])
+    today = pd.DataFrame([_row(3, 7, "MF", 45, BALL_WIN_NUMBER=4.0),       # 4 in 45' = 8 per 90: better than 6
+                          _row(3, 9, "MF", 10, BALL_WIN_NUMBER=5.0),       # cameo: shown, not rated
+                          _row(3, 10, "MF", 90, BALL_WIN_NUMBER=5.0)])     # 5 per 90: worse than 6, no history
     groups = pb.build_player_tables(history, today, 1)
-    assert [g["group"] for g in groups] == ["MF"] and [p["playerId"] for p in groups[0]["players"]] == [7, 9]
-    xt = lambda p: next(c for c in p["cells"] if c["key"] == "xt")
-    assert xt(groups[0]["players"][0])["season"] == "up" and xt(groups[0]["players"][0])["league"] == "up"
-    assert xt(groups[0]["players"][1])["season"] == "" and xt(groups[0]["players"][1])["league"] == ""
+    assert [g["group"] for g in groups] == ["MF"] and [p["playerId"] for p in groups[0]["players"]] == [10, 7, 9]
+    wins = lambda p: next(c for c in p["cells"] if c["key"] == "wins")
+    by_id = {p["playerId"]: p for p in groups[0]["players"]}
+    assert wins(by_id[7])["today"] == 4.0 and wins(by_id[7])["season"] == "up" and wins(by_id[7])["league"] == "up"
+    assert wins(by_id[9])["today"] == 5.0 and wins(by_id[9])["season"] == "" and wins(by_id[9])["league"] == ""
+    assert wins(by_id[10])["season"] == "" and wins(by_id[10])["league"] == "down"          # no earlier minutes: no season
+
+
+def test_lower_is_better_metrics_flip_the_verdict():
+    history = pd.DataFrame([_row(1, 7, "MF", 90, BALL_LOSS_NUMBER=10.0), _row(1, 8, "MF", 90, squad=2, BALL_LOSS_NUMBER=10.0)])
+    today = pd.DataFrame([_row(2, 7, "MF", 90, BALL_LOSS_NUMBER=5.0)])
+    cell = next(c for c in pb.build_player_tables(history, today, 1)[0]["players"][0]["cells"] if c["key"] == "losses")
+    assert cell["season"] == "up" and cell["league"] == "up"
 
 
 def test_both_verdict_combines_the_two_comparisons():
@@ -77,23 +88,34 @@ def test_both_verdict_combines_the_two_comparisons():
     assert pb._both("level", "level") == "level" and pb._both("", "down") == "down" and pb._both("", "") == ""
 
 
-def test_players_context_has_a_page_per_position_with_both_teams_as_columns():
-    history = pd.DataFrame([_row(1, 7, "MF", 90, PXT_ATTACK=0.9), _row(2, 7, "MF", 90, PXT_ATTACK=0.9),
+def test_players_context_is_charlton_only_with_a_page_per_position():
+    history = pd.DataFrame([_row(1, 7, "MF", 90, PXT_ATTACK=0.9, SUCCESSFUL_PASSES=40.0),
+                            _row(2, 7, "MF", 90, PXT_ATTACK=0.9, SUCCESSFUL_PASSES=40.0),
                             _row(1, 8, "MF", 90, squad=2), _row(2, 8, "MF", 90, squad=2)])
-    today = pd.DataFrame([_row(3, 7, "MF", 90, PXT_ATTACK=1.8), _row(3, 9, "MF", 10, squad=1),
+    today = pd.DataFrame([_row(3, 7, "MF", 90, PXT_ATTACK=1.8, SUCCESSFUL_PASSES=44.0), _row(3, 9, "MF", 10, squad=1),
                           _row(3, 8, "MF", 90, squad=2, PXT_ATTACK=0.0)])
     events = pd.DataFrame([dict(playerId=7, playerName="A Seven", squadName="Home", squadId=1),
                            dict(playerId=9, playerName="C Nine", squadName="Home", squadId=1),
                            dict(playerId=8, playerName="B Eight", squadName="Away", squadId=2)])
-    ctx = pb.players_context(pd.concat([history, today], ignore_index=True), events, ("Home", "Away"), 3)
+    ctx = pb.players_context(pd.concat([history, today], ignore_index=True), events, "Home", 3)
     pages = {p["key"]: p for p in ctx["player_pages"]}
     assert list(pages) == ["gk", "cb", "fb", "mf", "w", "cf"] and ctx["player_baseline_matches"] == 2
     assert pages["gk"]["columns"] == [] and pages["cf"]["rows"][0]["cells"] == []         # empty groups are kept
     mf = pages["mf"]
-    assert [(c["name"], c["is_subject"], c["rated"]) for c in mf["columns"]] == [
-        ("Seven", True, True), ("Nine", True, False), ("Eight", False, True)]
-    assert [r["label"] for r in mf["rows"]] == ["Minutes", "Pass %", "Threat /90", "Opp. bypassed /90", "Ball wins /90",
-                                                 "Pressures /90", "Ball losses /90"]
-    threat = next(r for r in mf["rows"] if r["label"] == "Threat /90")["cells"]
-    assert threat[0]["text"] == "1.80" and threat[0]["own"] == "0.90" and threat[0]["v_both"] == "up"
-    assert threat[1]["v_both"] == ""                                                       # 10 minutes: not rated
+    assert [(c["name"], c["rated"]) for c in mf["columns"]] == [("Seven", True), ("Nine", False)]   # no Away players
+    assert [r["label"] for r in mf["rows"]][:3] == ["Passes completed", "Pass accuracy", "Threat created (xT)"]
+    assert all(r["desc"] != "" for r in mf["rows"] if r["label"] == "Threat created (xT)")
+    passes = mf["rows"][0]["cells"][0]
+    assert passes["text"] == "44" and passes["own"] == "40.0" and passes["v_both"] == "up"   # raw today, per-90 averages
+    xt = next(r for r in mf["rows"] if r["label"] == "Threat created (xT)")["cells"][0]
+    assert xt["text"] == "1.80" and xt["own"] == "0.90"
+    assert mf["rows"][0]["cells"][1]["v_both"] == ""                                       # 10 minutes: not rated
+
+
+def test_every_position_has_metrics_defined_and_actor_sql_covers_every_actor_column():
+    assert set(pb.GROUP_METRICS) == set(pb.GROUP_ORDER)
+    assert all(k in pb.METRICS for keys in pb.GROUP_METRICS.values() for k in keys)
+    needed = {c for m in pb.METRICS.values() for c in (*m.num, *(m.den or ()))}
+    assert needed <= set(pb.VALUE_COLUMNS)
+    sql = pb._actor_sql("e.MATCH_ID in (1)", 2114)
+    assert all(f'"{c}"' in sql for c in pb.ACTOR_COLUMNS)

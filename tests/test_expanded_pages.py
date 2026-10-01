@@ -106,17 +106,12 @@ def _stub_context(tracked: bool, team_sheet: bool = True) -> dict:
     )
     ctx.update(
         player_pages=[{"key": g.lower(), "label": g_label,
-                       "columns": [{"team": teams[0], "is_subject": True, "name": "Moylan", "shirt": 8, "minutes": 82,
-                                    "rated": True},
-                                   {"team": teams[1], "is_subject": False, "name": "Grant", "shirt": 9, "minutes": 10,
-                                    "rated": False}] if g == "MF" else [],
-                       "rows": [{"label": "Minutes", "is_minutes": True,
-                                 "cells": [{"text": "82'", "own": "", "league": "", "v_own": "", "v_league": "", "v_both": ""},
-                                           {"text": "10'", "own": "", "league": "", "v_own": "", "v_league": "", "v_both": ""}]},
-                                {"label": "Pass %", "is_minutes": False,
-                                 "cells": [{"text": "81%", "own": "70%", "league": "85%", "v_own": "up", "v_league": "down",
+                       "columns": [{"name": "Moylan", "shirt": 8, "minutes": 82, "rated": True},
+                                   {"name": "Grant", "shirt": 9, "minutes": 10, "rated": False}] if g == "MF" else [],
+                       "rows": [{"label": "Passes completed", "desc": "Successful passes",
+                                 "cells": [{"text": "31", "own": "28.4", "league": "35.0", "v_own": "up", "v_league": "down",
                                             "v_both": "mixed"},
-                                           {"text": "50%", "own": "–", "league": "85%", "v_own": "", "v_league": "",
+                                           {"text": "4", "own": "–", "league": "35.0", "v_own": "", "v_league": "",
                                             "v_both": ""}]}]}
                       for g, g_label in (("GK", "Goalkeepers"), ("CB", "Centre-backs"), ("FB", "Full-backs"),
                                          ("MF", "Midfielders"), ("W", "Wingers"), ("CF", "Forwards"))],
@@ -209,6 +204,8 @@ def test_player_performance_pages_are_one_per_position_with_players_as_columns()
     html = env.get_template("expanded.html.j2").render(**_stub_context(True))
     assert html.count("Player Performance ·") == 6
     assert "Player Performance · Midfielders" in html and "6 earlier matches" in html
-    assert '<td class="val v-mixed' in html and 'class="avg a-up"' in html and 'class="avg a-down"' in html
-    assert "No wingers were used by either team" in html          # empty groups keep their page
-    assert html.count('<th class="sub') >= 3
+    assert 'class="val tstart v-mixed"' in html and 'class="avg a-up"' in html and 'class="avg a-down"' in html
+    assert ">Today<" in html and ">Season /90<" in html and ">League /90<" in html
+    assert "<b>Passes completed</b><small>Successful passes</small>" in html
+    assert "No wingers played for Charlton Athletic" in html          # empty groups keep their page
+    assert "Cardiff" not in html.split("Player Performance · Midfielders")[1].split("</section>")[0]
