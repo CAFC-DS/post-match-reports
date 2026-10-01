@@ -359,7 +359,7 @@ def _player_threat_ranking(events: pd.DataFrame, charlton: str, opponent: str) -
     return _uri_fixed(fig), totals
 
 
-def _second_ball_panel(events: pd.DataFrame, team: str, baseline: pd.DataFrame) -> tuple[str, dict[str, Any]]:
+def _second_ball_kpis(events: pd.DataFrame, team: str, baseline: pd.DataFrame) -> dict[str, Any]:
     """Second-ball contests this team was involved in, as the union of the
     events where they started the contest (SECOND_BALL_START) and where
     they won it (SECOND_BALL_WIN) -- these are separate events, sometimes
@@ -370,29 +370,14 @@ def _second_ball_panel(events: pd.DataFrame, team: str, baseline: pd.DataFrame) 
     t = events.loc[events["squadName"] == team].sort_values("gameTimeInSec")
     flag = lambda name: pd.to_numeric(t.get(name, 0), errors="coerce").fillna(0)
     started, won = t.loc[flag("SECOND_BALL_START") == 1], t.loc[flag("SECOND_BALL_WIN") == 1]
-    contests = pd.concat([started, won]).drop_duplicates("eventId")
-    won_ids = set(won["eventId"])
-    won_mask = contests["eventId"].isin(won_ids)
-
-    pitch_obj, fig, ax = pitch._vertical_pitch((7.2, 5.6))
-    for mask, marker, color in ((won_mask, "o", palette.SUCCESS_GREEN), (~won_mask, "X", palette.FAIL_REDGREY)):
-        frame = contests.loc[mask]
-        if frame.empty: continue
-        x, y = pitch._to_pitch(frame["startAdjCoordinatesX"], frame["startAdjCoordinatesY"])
-        pitch_obj.scatter(x, y, ax=ax, s=42, color=color, marker=marker, edgecolors=palette.PAPER_2, linewidth=0.8, alpha=0.9, zorder=2)
-    from matplotlib.lines import Line2D
-    handles = [Line2D([0], [0], marker="o", color=palette.SUCCESS_GREEN, linestyle="", markersize=6, label="Won"),
-               Line2D([0], [0], marker="X", color=palette.FAIL_REDGREY, linestyle="", markersize=6, label="Lost")]
-    ax.legend(handles=handles, loc="lower center", bbox_to_anchor=(0.5, -0.06), ncol=2, frameon=False, fontsize=7)
-    n = len(contests)
-    won_n = len(won_ids)
+    n = len(pd.concat([started, won]).drop_duplicates("eventId"))
+    won_n = won["eventId"].nunique()
     baseline_avg = float(baseline["second_ball_wins"].mean())
-    kpis = {
+    return {
         "n": n, "won_n": won_n, "won_pct": round(won_n / n * 100) if n else 0,
         "baseline_avg": round(baseline_avg, 1), "baseline_delta": f"{won_n - baseline_avg:+.1f}",
         "baseline_n": len(baseline),
     }
-    return _uri(fig), kpis
 
 
 def _transition_response_map(events: pd.DataFrame, team: str, opponent: str) -> tuple[str, dict[str, Any]]:
@@ -1021,7 +1006,7 @@ def build_context(impect_match_id: int, dvms_match_id: str | None = None) -> dic
     networks={team:_local_passing_network_map(nets[team],mx,mt,met) for team in teams}
     network_scale_threat=round(mt,2)
     baseline=sb.build_season_baseline(charlton=subject)
-    second_balls={team:_second_ball_panel(events,team,baseline) for team in teams}
+    second_balls={team:_second_ball_kpis(events,team,baseline) for team in teams}
 
     home,away=context["meta"]["home_team"],context["meta"]["away_team"]
     team_stats=metrics.team_stats(events,home,away)
@@ -1075,7 +1060,7 @@ def build_context(impect_match_id: int, dvms_match_id: str | None = None) -> dic
         "player_threat_ranking_img":player_threat_ranking_img,
         "player_threat_ranking_totals":player_threat_ranking_totals,
         **ooc_ctx,
-        "second_ball_img":{t:v[0] for t,v in second_balls.items()},"second_ball_kpis":{t:v[1] for t,v in second_balls.items()},
+        "second_ball_kpis":second_balls,
         "transition_img":transition_img,"transition_kpis":transition_kpis,
         "duel_aerial_bars_img":_duel_bars_by_type(
             duel_involvement,subject,opponent,"AERIAL",events=events),
