@@ -12,9 +12,9 @@ TEMPLATES = Path(__file__).resolve().parents[1] / "src" / "report" / "expanded" 
 def test_page_counts():
     # The recovered report was 16 / 15 pages; the contents page, the team-sheet
     # page (needs DVMS lineups) and the receptions / threat pages add three.
-    assert build_page_plan(True)["total"] == 19
-    assert build_page_plan(False)["total"] == 18
-    assert build_page_plan(True, has_team_sheet=False)["total"] == 18
+    assert build_page_plan(True)["total"] == 21
+    assert build_page_plan(False)["total"] == 20
+    assert build_page_plan(True, has_team_sheet=False)["total"] == 20
     assert "ov_sheet" not in build_page_plan(True, has_team_sheet=False)["pages"]
 
 
@@ -24,7 +24,8 @@ def test_pages_are_numbered_contiguously_with_section_labels():
     assert numbers == list(range(1, plan["total"] + 1))
     assert plan["pages"]["contents"]["n"] == 1
     assert plan["pages"]["div_ip"]["label"] == "DIVIDER"
-    assert plan["pages"]["ov_sheet"]["label"] == "PAGE 1/3"
+    assert plan["pages"]["ov_sheet"]["label"] == "PAGE 1/5"
+    assert plan["pages"]["ov_players_0"]["label"] == "PAGE 2/5" and plan["pages"]["ov_players_1"]["label"] == "PAGE 3/5"
     assert plan["pages"]["net"]["label"] == "PAGE 1/7"
     assert plan["pages"]["ip_receptions"]["label"] == "PAGE 4/7"
     assert plan["pages"]["ip_threat_zones"]["label"] == "PAGE 5/7"
@@ -34,7 +35,7 @@ def test_pages_are_numbered_contiguously_with_section_labels():
     assert "oop_duel_maps" not in plan["pages"]
     assert plan["pages"]["oop_regains"]["label"] == "PAGE 3/3"
     assert "oop_second_balls" not in plan["pages"]
-    assert plan["sections"]["in_possession"] == {"first": 6, "last": 13}
+    assert plan["sections"]["in_possession"] == {"first": 8, "last": 15}
 
 
 def test_untracked_layout_merges_the_shape_pages():
@@ -103,6 +104,15 @@ def _stub_context(tracked: bool, team_sheet: bool = True) -> dict:
         line_breaks_available=True,
         contents=build_contents(plan, teams[0], tracked, team_sheet),
     )
+    ctx.update(
+        player_baseline_matches=6,
+        player_tables={t: [{"label": "Midfielders", "columns": ["Pass %", "Threat /90"],
+                            "players": [{"shirt": 8, "name": "Moylan", "minutes": 82,
+                                         "cells": [{"text": "81%", "season": "up", "league": "down", "season_text": "70%",
+                                                    "league_text": "85%"},
+                                                   {"text": "0.10", "season": "", "league": "level", "season_text": "–",
+                                                    "league_text": "0.10"}]}]}] for t in teams},
+    )
     if team_sheet:
         row = {"shirt": 1, "name": "A Player", "role": "GK", "minutes": 96, "marks": [{"kind": "goal", "text": "7'"}]}
         ctx.update(
@@ -130,7 +140,7 @@ def test_contents_page_lists_every_section_with_its_page_span():
     plan = build_page_plan(True)
     rows = build_contents(plan, "Charlton Athletic", True, True)
     assert [r["title"] for r in rows] == ["Overview", "In Possession", "Out of Possession", "Transition"]
-    assert rows[0]["pages"] == "pages 2\u20135"
+    assert rows[0]["pages"] == "pages 2\u20137"
     assert "Where players received the ball" in rows[1]["items"]
     assert "Team sheet, lineups & timeline" in rows[0]["items"]
     assert "Team-by-team tracked phase shapes" in rows[1]["items"]
@@ -182,3 +192,12 @@ def test_entries_fall_back_to_completion_when_there_is_no_line_break_data():
     assert "through" not in html.split("Final Third & Box Entries")[1].split("WHO GOT THE BALL THERE")[0].replace(
         "route · outcome · destination", "")
     assert "<b>5/8</b> completed (62%)" in html or "<b>5/8</b> completed (63%)" in html
+
+
+def test_player_performance_pages_show_values_and_verdict_arrows():
+    env = Environment(loader=FileSystemLoader(str(TEMPLATES)), autoescape=select_autoescape(["html"]),
+                      trim_blocks=True, lstrip_blocks=True)
+    html = env.get_template("expanded.html.j2").render(**_stub_context(True))
+    assert html.count("Player Performance ·") == 2
+    assert "<b>81%</b>" in html and '<em class="up"' in html and '<em class="down"' in html
+    assert "Midfielders" in html and "6 earlier matches" in html

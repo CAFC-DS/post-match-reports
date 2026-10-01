@@ -12,7 +12,7 @@ from typing import Any
 SECTIONS = ("overview", "in_possession", "out_of_possession", "transition")
 
 
-def _plan(tracked_shapes: bool, has_team_sheet: bool) -> list[tuple[str, str, bool]]:
+def _plan(tracked_shapes: bool, has_team_sheet: bool, has_players: bool) -> list[tuple[str, str, bool]]:
     """Ordered ``(key, section, is_divider)`` for the report."""
     plan: list[tuple[str, str, bool]] = [
         ("contents", "front", True),
@@ -20,6 +20,8 @@ def _plan(tracked_shapes: bool, has_team_sheet: bool) -> list[tuple[str, str, bo
     ]
     if has_team_sheet:
         plan.append(("ov_sheet", "overview", False))
+    if has_players:
+        plan += [("ov_players_0", "overview", False), ("ov_players_1", "overview", False)]
     plan += [
         ("ov_stats", "overview", False),
         ("ov_flow", "overview", False),
@@ -45,7 +47,7 @@ def _plan(tracked_shapes: bool, has_team_sheet: bool) -> list[tuple[str, str, bo
     return plan
 
 
-def build_page_plan(tracked_shapes: bool, has_team_sheet: bool = True) -> dict[str, Any]:
+def build_page_plan(tracked_shapes: bool, has_team_sheet: bool = True, has_players: bool = True) -> dict[str, Any]:
     """Number every page and label content pages ``PAGE i/n`` within their section.
 
     Returns ``{"pages": {key: {...}}, "order": [key, ...], "total": int,
@@ -53,7 +55,7 @@ def build_page_plan(tracked_shapes: bool, has_team_sheet: bool = True) -> dict[s
     ``n`` (1-based position in the report), ``section``, ``divider`` and
     ``label`` (``"DIVIDER"`` or ``"PAGE i/n"``).
     """
-    plan = _plan(tracked_shapes, has_team_sheet)
+    plan = _plan(tracked_shapes, has_team_sheet, has_players)
     content_total: dict[str, int] = {}
     for _, section, divider in plan:
         if not divider:
@@ -76,10 +78,13 @@ def build_page_plan(tracked_shapes: bool, has_team_sheet: bool = True) -> dict[s
     return {"pages": pages, "order": [k for k, _, _ in plan], "total": len(plan), "sections": sections}
 
 
-def section_info(subject: str, tracked_shapes: bool, has_team_sheet: bool) -> dict[str, dict[str, Any]]:
+def section_info(subject: str, tracked_shapes: bool, has_team_sheet: bool,
+                 has_players: bool = True) -> dict[str, dict[str, Any]]:
     """Title, blurb and sub-items per section: the single source for both the
     divider pages and the contents page."""
     overview = ["Match stats & team performance", "Match flow, timeline & xG race"]
+    if has_players:
+        overview.insert(0, "Player performance vs season & league averages")
     if has_team_sheet:
         overview.insert(0, "Team sheet, lineups & timeline")
     return {
@@ -114,9 +119,9 @@ def section_info(subject: str, tracked_shapes: bool, has_team_sheet: bool) -> di
 
 
 def build_contents(plan: dict[str, Any], subject: str, tracked_shapes: bool,
-                   has_team_sheet: bool) -> list[dict[str, Any]]:
+                   has_team_sheet: bool, has_players: bool = True) -> list[dict[str, Any]]:
     """Contents rows: section info plus the page span from the plan."""
-    info = section_info(subject, tracked_shapes, has_team_sheet)
+    info = section_info(subject, tracked_shapes, has_team_sheet, has_players)
     rows = []
     for section in SECTIONS:
         span = plan["sections"][section]

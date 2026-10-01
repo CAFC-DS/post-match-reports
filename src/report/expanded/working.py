@@ -25,6 +25,7 @@ from src.report.expanded import _fonts
 from src.report.expanded import season_baseline as sb
 from src.report.expanded import inpossession as inpossession_mod
 from src.report.expanded import outofpossession as outofpossession_mod
+from src.report.expanded import player_baseline
 from src.report.expanded import shooting as shooting_mod
 from src.report.expanded import overview as overview_mod
 from src.report.expanded.pages import build_contents, build_page_plan, section_info
@@ -1038,12 +1039,22 @@ def build_context(impect_match_id: int, dvms_match_id: str | None = None) -> dic
     has_sheet=bool(overview_ctx)
     flow_timeline_img=_flow_timeline(events,dvms_match,subject,opponent)
     timeline_img=_match_timeline(events,overview_ctx.get("timeline_by_team"),subject,opponent)
-    page_plan=build_page_plan(tracked,has_sheet)
+    players_ctx: dict[str, Any]={}
+    try:
+        kickoff=pd.Timestamp(events["dateTime"].iloc[0]).tz_convert("UTC").strftime("%Y-%m-%dT%H:%M:%SZ")
+        players_ctx=player_baseline.players_context(
+            player_baseline.season_to_date(impect_match_id,int(events["iterationId"].iloc[0]),kickoff),
+            events,(subject,opponent),impect_match_id)
+    except Exception as error:   # the tables are an extra: say why they are missing rather than fail the report
+        print(f"warning: player tables skipped ({type(error).__name__}: {error})")
+    has_players=bool(players_ctx.get("player_tables"))
+    page_plan=build_page_plan(tracked,has_sheet,has_players)
     context.update({
         "generated_date":dt.date.today().strftime("%d %B %Y"),
         "page_plan":page_plan,"report_page_count":page_plan["total"],
-        "section_info":section_info(subject,tracked,has_sheet),
-        "contents":build_contents(page_plan,subject,tracked,has_sheet),
+        "section_info":section_info(subject,tracked,has_sheet,has_players),
+        "contents":build_contents(page_plan,subject,tracked,has_sheet,has_players),
+        **players_ctx,
         **overview_ctx,
         **inpossession_mod.inpossession_context(events,subject,opponent),
         **shooting_mod.shooting_context(events,subject,opponent,{subject:palette.CHARLTON_RED,opponent:palette.OPPONENT_GREY}),
