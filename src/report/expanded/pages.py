@@ -35,6 +35,7 @@ def _plan(tracked_shapes: bool, has_team_sheet: bool) -> list[tuple[str, str, bo
         ("ip_threat_zones", "in_possession", False),
         ("ip_entries", "in_possession", False),
         ("ip_shots", "in_possession", False),
+        ("ip_shot_placement", "in_possession", False),
         ("div_oop", "out_of_possession", True),
         ("oop_pressure", "out_of_possession", False),
         ("oop_duels", "out_of_possession", False),
@@ -98,7 +99,8 @@ def section_info(subject: str, tracked_shapes: bool, has_team_sheet: bool) -> di
                       "Where players received the ball",
                       "Threat density, role zones & player threat",
                       "Final-third & box entries",
-                      "Comparative shot maps & xG sources"],
+                      "Comparative shot maps & xG sources",
+                      "Shot placement & post-shot xG"],
         },
         "out_of_possession": {
             "num": 3, "title": "Out of Possession",

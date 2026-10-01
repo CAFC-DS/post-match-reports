@@ -102,6 +102,10 @@ select
     e.END_DETAIL:pitchPosition::string as "endPitchPosition",
     e.END_DETAIL:lane::string as "endLane",
     e.END_DETAIL:packingZone::string as "endPackingZone",
+    -- Where a shot ended up on the goal frame (metres; +y is the attacker left, z is height).
+    e.RAW_EVENT:shot.targetPoint.y::float as "targetY",
+    e.RAW_EVENT:shot.targetPoint.z::float as "targetZ",
+    e.RAW_EVENT:shot.woodwork::string as "woodwork",
     e.EVENT_KPIS as "eventKpis"
 from CAFC_DB.IMPECT_RAW.EVENTS e
 join CAFC_DB.IMPECT_RAW.MATCHES m on m.ID = e.MATCH_ID

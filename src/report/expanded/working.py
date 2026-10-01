@@ -24,6 +24,7 @@ from src.report.render_combined import build_context as build_shared_context
 from src.report.expanded import _fonts
 from src.report.expanded import season_baseline as sb
 from src.report.expanded import inpossession as inpossession_mod
+from src.report.expanded import shooting as shooting_mod
 from src.report.expanded import overview as overview_mod
 from src.report.expanded.pages import build_contents, build_page_plan, section_info
 
@@ -1181,6 +1182,7 @@ def build_context(impect_match_id: int, dvms_match_id: str | None = None) -> dic
         "contents":build_contents(page_plan,subject,tracked,has_sheet),
         **overview_ctx,
         **inpossession_mod.inpossession_context(events,subject,opponent),
+        **shooting_mod.shooting_context(events,subject,opponent,{subject:palette.CHARLTON_RED,opponent:palette.OPPONENT_GREY}),
         "subject":subject,"opponent":opponent,"team_order":teams,"side_by_team":side_by_team,
         "network":networks,"network_scale_threat":network_scale_threat,
         "stat_rows_expanded":stat_rows_expanded,
