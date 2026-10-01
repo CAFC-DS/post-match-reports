@@ -25,6 +25,7 @@ def _plan(tracked_shapes: bool, has_team_sheet: bool, has_players: bool) -> list
     plan += [
         ("ov_stats", "overview", False),
         ("ov_flow", "overview", False),
+        ("ov_phases", "overview", False),
         ("div_ip", "in_possession", True),
         ("net", "in_possession", False),
     ]
@@ -82,7 +83,8 @@ def section_info(subject: str, tracked_shapes: bool, has_team_sheet: bool,
                  has_players: bool = True) -> dict[str, dict[str, Any]]:
     """Title, blurb and sub-items per section: the single source for both the
     divider pages and the contents page."""
-    overview = ["Match stats & team performance", "Match flow, timeline & xG race"]
+    overview = ["Match stats & team performance", "Match flow, timeline & xG race",
+                "Game state & 15-minute phases"]
     if has_players:
         overview.insert(0, "Player performance by position vs season & league averages")
     if has_team_sheet:

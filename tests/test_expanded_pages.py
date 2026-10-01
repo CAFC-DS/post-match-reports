@@ -12,9 +12,9 @@ TEMPLATES = Path(__file__).resolve().parents[1] / "src" / "report" / "expanded" 
 def test_page_counts():
     # The recovered report was 16 / 15 pages; the contents page, the team-sheet
     # page (needs DVMS lineups) and the receptions / threat pages add three.
-    assert build_page_plan(True)["total"] == 25
-    assert build_page_plan(False)["total"] == 24
-    assert build_page_plan(True, has_team_sheet=False)["total"] == 24
+    assert build_page_plan(True)["total"] == 26
+    assert build_page_plan(False)["total"] == 25
+    assert build_page_plan(True, has_team_sheet=False)["total"] == 25
     assert "ov_sheet" not in build_page_plan(True, has_team_sheet=False)["pages"]
 
 
@@ -24,8 +24,8 @@ def test_pages_are_numbered_contiguously_with_section_labels():
     assert numbers == list(range(1, plan["total"] + 1))
     assert plan["pages"]["contents"]["n"] == 1
     assert plan["pages"]["div_ip"]["label"] == "DIVIDER"
-    assert plan["pages"]["ov_sheet"]["label"] == "PAGE 1/9"
-    assert plan["pages"]["ov_players_gk"]["label"] == "PAGE 2/9" and plan["pages"]["ov_players_cf"]["label"] == "PAGE 7/9"
+    assert plan["pages"]["ov_sheet"]["label"] == "PAGE 1/10"
+    assert plan["pages"]["ov_players_gk"]["label"] == "PAGE 2/10" and plan["pages"]["ov_players_cf"]["label"] == "PAGE 7/10"
     assert plan["pages"]["net"]["label"] == "PAGE 1/7"
     assert plan["pages"]["ip_receptions"]["label"] == "PAGE 4/7"
     assert plan["pages"]["ip_threat_zones"]["label"] == "PAGE 5/7"
@@ -35,7 +35,7 @@ def test_pages_are_numbered_contiguously_with_section_labels():
     assert "oop_duel_maps" not in plan["pages"]
     assert plan["pages"]["oop_regains"]["label"] == "PAGE 3/3"
     assert "oop_second_balls" not in plan["pages"]
-    assert plan["sections"]["in_possession"] == {"first": 12, "last": 19}
+    assert plan["sections"]["in_possession"] == {"first": 13, "last": 20}
 
 
 def test_untracked_layout_merges_the_shape_pages():
@@ -99,6 +99,13 @@ def _stub_context(tracked: bool, team_sheet: bool = True) -> dict:
         entry_givers_ctx={t: {"img": "", "n_final_third": 1, "n_box": 1} for t in teams},
         placement_img={t: "" for t in teams},
         placement_ctx={t: {"placed": 4, "on_target": 2, "goals": 1, "woodwork": 0, "xgot": "0.80"} for t in teams},
+        gamestate={"states": [{"key": "leading", "label": "Leading", "minutes": 30.0, "small": False, "xg_for": .4,
+                               "xg_against": .1, "shots_for": 3, "shots_against": 1, "possession": 55,
+                               "pressures_per_min": 2.1, "regains": 4}],
+                   "other": [{"label": "First half", "minutes": 45.0, "small": True, "xg_for": .4, "xg_against": .1,
+                              "shots_for": 3, "shots_against": 1, "possession": None, "pressures_per_min": 2.0,
+                              "regains": 3}], "end": 96.0, "first_goal": (20.0, "Charlton Athletic", "C Campbell")},
+        gamestate_band_img="", gamestate_period_img="",
         flow_timeline_img="",
         timeline_img="",
         line_breaks_available=True,
@@ -144,7 +151,7 @@ def test_contents_page_lists_every_section_with_its_page_span():
     plan = build_page_plan(True)
     rows = build_contents(plan, "Charlton Athletic", True, True)
     assert [r["title"] for r in rows] == ["Overview", "In Possession", "Out of Possession", "Transition"]
-    assert rows[0]["pages"] == "pages 2\u201311"
+    assert rows[0]["pages"] == "pages 2\u201312"
     assert "Where players received the ball" in rows[1]["items"]
     assert "Team sheet, lineups & timeline" in rows[0]["items"]
     assert "Team-by-team tracked phase shapes" in rows[1]["items"]
@@ -209,3 +216,11 @@ def test_player_performance_pages_are_one_per_position_with_players_as_columns()
     assert "<b>Passes completed</b><small>Successful passes</small>" in html
     assert "No wingers played for Charlton Athletic" in html          # empty groups keep their page
     assert "Cardiff" not in html.split("Player Performance · Midfielders")[1].split("</section>")[0]
+
+
+def test_game_state_page_renders_the_slice_table():
+    env = Environment(loader=FileSystemLoader(str(TEMPLATES)), autoescape=select_autoescape(["html"]),
+                      trim_blocks=True, lstrip_blocks=True)
+    html = env.get_template("expanded.html.j2").render(**_stub_context(True))
+    assert "Game State & Phases" in html and "By 15-minute period" in html
+    assert 'class="sw sw-leading"' in html and "First half*" in html and "<b>0.40</b> – 0.10" in html

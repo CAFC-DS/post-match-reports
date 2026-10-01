@@ -24,6 +24,7 @@ from src.report.render_combined import build_context as build_shared_context
 from src.report.expanded import _fonts
 from src.report.expanded import season_baseline as sb
 from src.report.expanded import inpossession as inpossession_mod
+from src.report.expanded import gamestate as gamestate_mod
 from src.report.expanded import outofpossession as outofpossession_mod
 from src.report.expanded import player_baseline
 from src.report.expanded import shooting as shooting_mod
@@ -1037,6 +1038,9 @@ def build_context(impect_match_id: int, dvms_match_id: str | None = None) -> dic
             dvms_match.f7,dvms_match.f24.events,dvms_match.avg_positions,
             lambda x,y:metrics_dvms._metres_to_adj(x,y,dvms_match.meta),events,subject)
     has_sheet=bool(overview_ctx)
+    first_sub=min([e["minute"] for _,_,evs in overview_ctx.get("timeline_by_team",[]) for e in evs if e["kind"]=="sub"],
+                  default=None)
+    gamestate_ctx=gamestate_mod.gamestate_context(events,pressure_events,subject,opponent,first_sub)
     flow_timeline_img=_flow_timeline(events,dvms_match,subject,opponent)
     timeline_img=_match_timeline(events,overview_ctx.get("timeline_by_team"),subject,opponent)
     players_ctx: dict[str, Any]={}
@@ -1072,6 +1076,7 @@ def build_context(impect_match_id: int, dvms_match_id: str | None = None) -> dic
         "player_threat_ranking_img":player_threat_ranking_img,
         "player_threat_ranking_totals":player_threat_ranking_totals,
         **ooc_ctx,
+        **gamestate_ctx,
         "second_ball_kpis":second_balls,
         "transition_img":transition_img,"transition_kpis":transition_kpis,
         "duel_aerial_bars_img":_duel_bars_by_type(
