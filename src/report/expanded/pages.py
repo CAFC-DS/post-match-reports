@@ -132,3 +132,34 @@ def build_contents(plan: dict[str, Any], subject: str, tracked_shapes: bool,
         pages = f"page {span['first']}" if span["first"] == span["last"] else f"pages {span['first']}\u2013{span['last']}"
         rows.append({**info[section], "section": section, "pages": pages, "first": span["first"]})
     return rows
+
+
+# Titles for the PDF outline (bookmarks). Dividers carry their section title instead.
+PAGE_TITLES: dict[str, str] = {
+    "ov_summary": "Match summary", "ov_sheet": "Team sheet, lineups & timeline",
+    "ov_players_gk": "Player performance · Goalkeepers", "ov_players_cb": "Player performance · Centre-backs",
+    "ov_players_fb": "Player performance · Full-backs", "ov_players_mf": "Player performance · Midfielders",
+    "ov_players_w": "Player performance · Wingers", "ov_players_cf": "Player performance · Forwards",
+    "ov_stats": "Match stats & team performance", "ov_flow": "Match flow, timeline & xG race",
+    "ov_phases": "Game state & phases",
+    "net": "Passing networks & progression", "shapes": "Average positions", "shapes_0": "Phase shapes · first team",
+    "shapes_1": "Phase shapes · second team", "ip_receptions": "Where players received the ball",
+    "ip_threat_zones": "Threat creation & player threat", "ip_entries": "Final-third & box entries",
+    "ip_shots": "Shot maps, placement & chance sources", "oop_pressure": "Pressing & duels",
+    "oop_duels": "Player duel performance", "oop_regains": "Ball regains & second balls",
+    "trans_response": "Transition response",
+}
+
+
+def build_toc(plan: dict[str, Any], info: dict[str, dict[str, Any]]) -> list[list[Any]]:
+    """PyMuPDF table of contents: Contents, then each section (its divider page) with its content pages beneath."""
+    toc: list[list[Any]] = []
+    for key in plan["order"]:
+        page = plan["pages"][key]
+        if key == "contents":
+            toc.append([1, "Contents", page["n"]])
+        elif page["divider"]:
+            toc.append([1, info[page["section"]]["title"], page["n"]])
+        else:
+            toc.append([2, PAGE_TITLES.get(key, key), page["n"]])
+    return toc

@@ -24,13 +24,14 @@ from src.report.render_combined import build_context as build_shared_context
 from src.report.expanded import _fonts
 from src.report.expanded import season_baseline as sb
 from src.report.expanded import inpossession as inpossession_mod
+from src.report.expanded import bookmarks
 from src.report.expanded import gamestate as gamestate_mod
 from src.report.expanded import summary as summary_mod
 from src.report.expanded import outofpossession as outofpossession_mod
 from src.report.expanded import player_baseline
 from src.report.expanded import shooting as shooting_mod
 from src.report.expanded import overview as overview_mod
-from src.report.expanded.pages import build_contents, build_page_plan, section_info
+from src.report.expanded.pages import build_contents, build_page_plan, build_toc, section_info
 
 
 def _heatmap_pitch_kwargs() -> dict:
@@ -1023,6 +1024,8 @@ def render_report(impect_match_id: int, dvms_match_id: str | None, output_path: 
     context=build_context(impect_match_id,dvms_match_id)
     env=Environment(loader=FileSystemLoader(str(TEMPLATES_DIR)),autoescape=select_autoescape(["html"]),trim_blocks=True,lstrip_blocks=True)
     html=env.get_template("expanded.html.j2").render(**context)
+    toc=build_toc(context["page_plan"],context["section_info"])
+    contents=[{"title":row["title"],"first":row["first"]} for row in context["contents"]]
     # The context contains many large base64 chart images. Release it before
     # Chromium starts so private GitHub runners do not have to hold both the
     # plotting data and the browser in memory at the same time.
@@ -1038,4 +1041,5 @@ def render_report(impect_match_id: int, dvms_match_id: str | None, output_path: 
             str(chrome),"--headless","--disable-gpu","--no-pdf-header-footer",
             f"--print-to-pdf={output_path.resolve()}",html_path.resolve().as_uri(),
         ],check=True,capture_output=True)
+    bookmarks.add_navigation(output_path,toc,contents)
     return output_path
