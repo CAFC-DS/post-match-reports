@@ -12,9 +12,9 @@ TEMPLATES = Path(__file__).resolve().parents[1] / "src" / "report" / "expanded" 
 def test_page_counts():
     # The recovered report was 16 / 15 pages; the contents page, the team-sheet
     # page (needs DVMS lineups) and the receptions / threat pages add three.
-    assert build_page_plan(True)["total"] == 26
-    assert build_page_plan(False)["total"] == 25
-    assert build_page_plan(True, has_team_sheet=False)["total"] == 25
+    assert build_page_plan(True)["total"] == 27
+    assert build_page_plan(False)["total"] == 26
+    assert build_page_plan(True, has_team_sheet=False)["total"] == 26
     assert "ov_sheet" not in build_page_plan(True, has_team_sheet=False)["pages"]
 
 
@@ -24,8 +24,8 @@ def test_pages_are_numbered_contiguously_with_section_labels():
     assert numbers == list(range(1, plan["total"] + 1))
     assert plan["pages"]["contents"]["n"] == 1
     assert plan["pages"]["div_ip"]["label"] == "DIVIDER"
-    assert plan["pages"]["ov_sheet"]["label"] == "PAGE 1/10"
-    assert plan["pages"]["ov_players_gk"]["label"] == "PAGE 2/10" and plan["pages"]["ov_players_cf"]["label"] == "PAGE 7/10"
+    assert plan["pages"]["ov_sheet"]["label"] == "PAGE 2/11"
+    assert plan["pages"]["ov_players_gk"]["label"] == "PAGE 3/11" and plan["pages"]["ov_players_cf"]["label"] == "PAGE 8/11"
     assert plan["pages"]["net"]["label"] == "PAGE 1/7"
     assert plan["pages"]["ip_receptions"]["label"] == "PAGE 4/7"
     assert plan["pages"]["ip_threat_zones"]["label"] == "PAGE 5/7"
@@ -35,7 +35,7 @@ def test_pages_are_numbered_contiguously_with_section_labels():
     assert "oop_duel_maps" not in plan["pages"]
     assert plan["pages"]["oop_regains"]["label"] == "PAGE 3/3"
     assert "oop_second_balls" not in plan["pages"]
-    assert plan["sections"]["in_possession"] == {"first": 13, "last": 20}
+    assert plan["sections"]["in_possession"] == {"first": 14, "last": 21}
 
 
 def test_untracked_layout_merges_the_shape_pages():
@@ -83,7 +83,15 @@ def _stub_context(tracked: bool, team_sheet: bool = True) -> dict:
         second_ball_kpis={t: {k: 0 for k in ("won_n", "n", "baseline_avg", "baseline_delta", "baseline_n", "won_pct")} for t in teams},
         transition_kpis={k: 0 for k in ("high_losses_n", "counterpress_n", "shot_n", "shot_pct")},
         stat_rows_expanded=[],
-        match_highlights=[],
+        baseline_matches=46,
+        summary={"home": teams[1], "score": {teams[0]: 1, teams[1]: 3}, "half_time": {teams[0]: 1, teams[1]: 2},
+                 "scorers": {teams[0]: [{"who": "Campbell", "minute": "28'"}], teams[1]: [{"who": "Moylan", "minute": "7'"}]},
+                 "went": ["Charlton Athletic spent 7 minutes level and 89 minutes trailing and never led."],
+                 "numbers": [{"label": "Possession", "subject": "41%", "opponent": "59%"}],
+                 "season": {"above": ["Duels won: 61% against an average of 50% (80th percentile of 46 matches)"],
+                            "below": ["Shots: 6 against an average of 12 (10th percentile of 46 matches)"]},
+                 "standouts": [{"name": "Campbell", "position": "wingers", "minutes": 96, "ups": 8, "rated": 13,
+                                "best": ["Goals 1", "Expected goals (xG) 0.28"]}]},
         section_info=section_info(teams[0], tracked, team_sheet),
         progression_img={t: "" for t in teams},
         progression_kpis={t: {"total": 10, "actions": 5, "defenders": 3} for t in teams},
@@ -151,7 +159,7 @@ def test_contents_page_lists_every_section_with_its_page_span():
     plan = build_page_plan(True)
     rows = build_contents(plan, "Charlton Athletic", True, True)
     assert [r["title"] for r in rows] == ["Overview", "In Possession", "Out of Possession", "Transition"]
-    assert rows[0]["pages"] == "pages 2\u201312"
+    assert rows[0]["pages"] == "pages 2\u201313"
     assert "Where players received the ball" in rows[1]["items"]
     assert "Team sheet, lineups & timeline" in rows[0]["items"]
     assert "Team-by-team tracked phase shapes" in rows[1]["items"]
@@ -224,3 +232,15 @@ def test_game_state_page_renders_the_slice_table():
     html = env.get_template("expanded.html.j2").render(**_stub_context(True))
     assert "Game State & Phases" in html and "By 15-minute period" in html
     assert 'class="sw sw-leading"' in html and "First half*" in html and "<b>0.40</b> – 0.10" in html
+
+
+def test_match_summary_page_is_first_and_has_the_four_panels_without_the_old_highlights_card():
+    env = Environment(loader=FileSystemLoader(str(TEMPLATES)), autoescape=select_autoescape(["html"]),
+                      trim_blocks=True, lstrip_blocks=True)
+    html = env.get_template("expanded.html.j2").render(**_stub_context(True))
+    for text in ("Match Summary", "How the game went", "Key numbers", "season average",
+                 "Standout performers", "Half-time 2 – 1", "better than both averages in 8 of 13 measures"):
+        assert text in html, text
+    assert "Match Highlights" not in html
+    plan = build_page_plan(True)
+    assert plan["order"].index("ov_summary") < plan["order"].index("ov_sheet") and plan["pages"]["ov_summary"]["label"] == "PAGE 1/11"

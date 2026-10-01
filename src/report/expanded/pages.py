@@ -18,6 +18,7 @@ def _plan(tracked_shapes: bool, has_team_sheet: bool, has_players: bool) -> list
         ("contents", "front", True),
         ("div_overview", "overview", True),
     ]
+    plan.append(("ov_summary", "overview", False))
     if has_team_sheet:
         plan.append(("ov_sheet", "overview", False))
     if has_players:
@@ -89,6 +90,7 @@ def section_info(subject: str, tracked_shapes: bool, has_team_sheet: bool,
         overview.insert(0, "Player performance by position vs season & league averages")
     if has_team_sheet:
         overview.insert(0, "Team sheet, lineups & timeline")
+    overview.insert(0, "Match summary")
     return {
         "overview": {
             "num": 1, "title": "Overview",

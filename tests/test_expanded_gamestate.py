@@ -71,4 +71,4 @@ def test_charts_and_context_render():
     pressure = pd.DataFrame([dict(eventId=1, squadName=AWAY)])
     ctx = gs.gamestate_context(_events(), pressure, AWAY, HOME, 60.0)
     assert ctx["gamestate_band_img"].startswith("data:image/png") and ctx["gamestate_period_img"].startswith("data:image/png")
-    assert set(ctx["gamestate"]) == {"states", "other", "end", "first_goal"}
+    assert set(ctx["gamestate"]) == {"states", "other", "end", "first_goal"} and "periods" in ctx["gamestate_data"]

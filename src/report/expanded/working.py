@@ -25,6 +25,7 @@ from src.report.expanded import _fonts
 from src.report.expanded import season_baseline as sb
 from src.report.expanded import inpossession as inpossession_mod
 from src.report.expanded import gamestate as gamestate_mod
+from src.report.expanded import summary as summary_mod
 from src.report.expanded import outofpossession as outofpossession_mod
 from src.report.expanded import player_baseline
 from src.report.expanded import shooting as shooting_mod
@@ -769,33 +770,6 @@ def _performance_wheel(match_values: dict[str, float], baseline: pd.DataFrame) -
     return _uri(fig)
 
 
-def _match_highlights(match_values: dict[str, float], baseline: pd.DataFrame,
-                       charlton: str, opponent: str, speed_c: float, speed_o: float) -> list[str]:
-    """Three data-driven takeaways: the season-best percentile, the
-    season-worst, and the transition-speed comparison -- matching the
-    reference's 'Standout / Weak point / transition speed' triad."""
-    ranked = []
-    for category, col, label, higher_is_better in _PERFORMANCE_WHEEL_METRICS:
-        pct = sb.percentile_of(baseline, col, match_values[col])
-        if not higher_is_better:
-            pct = 100 - pct
-        ranked.append((pct, label))
-    ranked.sort()
-    worst_pct, worst_label = ranked[0]
-    best_pct, best_label = ranked[-1]
-
-    def ordinal(n: int) -> str:
-        return f"{n}{'th' if 11 <= n % 100 <= 13 else {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')}"
-
-    faster = charlton if speed_c >= speed_o else opponent
-    return [
-        f"Standout: {best_label} ranked {ordinal(round(best_pct))} percentile of {charlton}'s season.",
-        f"Weak point: {worst_label} ranked only {ordinal(round(worst_pct))} percentile of {charlton}'s season.",
-        f"{faster} transitioned faster than {opponent if faster == charlton else charlton}: "
-        f"{max(speed_c, speed_o):.2f} vs {min(speed_c, speed_o):.2f} m/s of ball progress.",
-    ]
-
-
 def _xg_race(events: pd.DataFrame, teams: list[str]) -> str:
     """Cumulative non-penalty xG step chart. X-axis ticks match the Match
     Flow / Territory chart directly above it on the same page (0'/15'/30'/HT/
@@ -906,58 +880,6 @@ def _starters_only_network(net: "metrics.PassingNetwork", events: pd.DataFrame, 
     return metrics.PassingNetwork(nodes, edges, net.first_sub_minute, net.total_passes)
 
 
-def _dvms_seconds(row: pd.Series) -> float:
-    """Impect's gameTimeInSec is a period-1 seconds-elapsed clock for
-    periodId 1, but jumps to a 10000+seconds-elapsed encoding for periodId
-    2 (e.g. '45:00.0000' -> 10000.0) rather than continuing or resetting --
-    confirmed empirically against this fixture's own event log. DVMS/Second
-    Spectrum's frames.game_clock resets to ~0 at the start of each period,
-    so period 2 needs the 10000 offset removed to align the two clocks."""
-    return float(row["gameTimeInSec"]) if row["periodId"] == 1 else float(row["gameTimeInSec"]) - 10000.0
-
-
-def _transition_speed_mps(events: pd.DataFrame, team: str, dvms_match) -> float:
-    """Net ball-tracking displacement per second of elapsed time, across
-    each of the team's ATTACKING_TRANSITION-phase possession sequences
-    (consecutive transition events with the same team). 'Ball progress' is
-    read as net progress (displacement over the whole sequence), not the
-    ball's raw instantaneous flight speed -- a passing sequence's ball
-    speed while airborne is 15-25 m/s, far above the reference's ~3-4 m/s,
-    while this sequence-level definition lands in the same range as the
-    reference's own 3.65/3.38 for this fixture. Still a reconstruction, not
-    a recovered original formula -- validated by magnitude, not derivation.
-    """
-    if dvms_match is None:
-        return 0.0
-    ball = dvms_match.frames.loc[dvms_match.frames["team"] == "ball"].sort_values(["period", "game_clock"])
-    t = events.loc[
-        (events["squadName"] == team) & (events["phase"] == "ATTACKING_TRANSITION")
-        & events["actionType"].isin(["PASS", "DRIBBLE"]) & (events["result"] == "SUCCESS")
-    ].copy()
-    if t.empty:
-        return 0.0
-    t["t"] = t.apply(_dvms_seconds, axis=1)
-    t = t.sort_values(["periodId", "t"])
-    # A gap of more than 6s between transition-tagged actions ends one
-    # transition burst and starts the next.
-    gap = t.groupby("periodId")["t"].diff()
-    seq = (gap.isna() | (gap > 6)).cumsum()
-
-    total_gain, total_time = 0.0, 0.0
-    for _, grp in t.groupby(seq):
-        period, t0, t1 = grp["periodId"].iloc[0], grp["t"].min(), grp["t"].max()
-        if t1 <= t0:
-            continue
-        before = ball.loc[(ball["period"] == period) & (ball["game_clock"] <= t0)].tail(1)
-        after = ball.loc[(ball["period"] == period) & (ball["game_clock"] >= t1)].head(1)
-        if before.empty or after.empty:
-            continue
-        dist = float(np.hypot(after["x"].iloc[0] - before["x"].iloc[0], after["y"].iloc[0] - before["y"].iloc[0]))
-        total_gain += dist
-        total_time += (t1 - t0)
-    return total_gain / total_time if total_time else 0.0
-
-
 def _flow_timeline(events: pd.DataFrame, dvms_match, subject: str, opponent: str) -> str:
     """Territory flow (tracking) or Impect momentum (fallback), for the overview's match-flow panel."""
     wave=None
@@ -1024,8 +946,6 @@ def build_context(impect_match_id: int, dvms_match_id: str | None = None) -> dic
     # duels_won, opponent_half_regains vs opposition_half_regains -- so two
     # of twelve wedges silently read 0.0 every time).
     charlton_match_values=sb.match_metrics(events,subject,opponent)
-    speed_subject=_transition_speed_mps(events,subject,dvms_match)
-    speed_opponent=_transition_speed_mps(events,opponent,dvms_match)
     threat_density_img,threat_density_kpis=_threat_density_maps(events,teams)
     entries_kpis=_entries_kpis(events,subject)
     ooc_ctx=outofpossession_mod.outofpossession_context(events,duel_involvement,pressure_events,subject,opponent)
@@ -1053,6 +973,8 @@ def build_context(impect_match_id: int, dvms_match_id: str | None = None) -> dic
     except Exception as error:   # the tables are an extra: say why they are missing rather than fail the report
         print(f"warning: player tables skipped ({type(error).__name__}: {error})")
     has_players=bool(players_ctx.get("player_pages"))
+    summary_ctx=summary_mod.summary_context(events,team_stats,charlton_match_values,baseline,_PERFORMANCE_WHEEL_METRICS,
+                                            gamestate_ctx["gamestate_data"],players_ctx.get("player_pages"),subject,opponent)
     page_plan=build_page_plan(tracked,has_sheet,has_players)
     context.update({
         "generated_date":dt.date.today().strftime("%d %B %Y"),
@@ -1067,7 +989,6 @@ def build_context(impect_match_id: int, dvms_match_id: str | None = None) -> dic
         "network":networks,"network_scale_threat":network_scale_threat,
         "stat_rows_expanded":stat_rows_expanded,
         "performance_img":_performance_wheel(charlton_match_values,baseline),
-        "match_highlights":_match_highlights(charlton_match_values,baseline,subject,opponent,speed_subject,speed_opponent),
         "xg_race_img":_xg_race(events,teams),
         "threat_density_img":threat_density_img,"threat_density_kpis":threat_density_kpis,
         "flow_timeline_img":flow_timeline_img,"timeline_img":timeline_img,
@@ -1077,6 +998,8 @@ def build_context(impect_match_id: int, dvms_match_id: str | None = None) -> dic
         "player_threat_ranking_totals":player_threat_ranking_totals,
         **ooc_ctx,
         **gamestate_ctx,
+        **summary_ctx,
+        "baseline_matches":len(baseline),
         "second_ball_kpis":second_balls,
         "transition_img":transition_img,"transition_kpis":transition_kpis,
         "duel_aerial_bars_img":_duel_bars_by_type(

@@ -205,6 +205,7 @@ def gamestate_context(events: pd.DataFrame, pressure: pd.DataFrame, subject: str
     data = game_state_tables(events, pressure, subject, opponent, first_sub_minute)
     return {
         "gamestate": {k: data[k] for k in ("states", "other", "end", "first_goal")},
+        "gamestate_data": data,
         "gamestate_band_img": state_band_chart(data, subject),
         "gamestate_period_img": period_chart(data["periods"], palette.CHARLTON_RED, palette.OPPONENT_GREY),
     }
