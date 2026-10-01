@@ -1090,13 +1090,8 @@ def _transition_speed_mps(events: pd.DataFrame, team: str, dvms_match) -> float:
     return total_gain / total_time if total_time else 0.0
 
 
-def _flow_timeline(events: pd.DataFrame, dvms_match, timeline_by_team, subject: str, opponent: str) -> str:
-    """Territory flow (tracking) or Impect momentum (fallback) with goals, cards
-    and substitutions marked, for the overview's match-flow panel."""
-    if timeline_by_team is None:      # no DVMS team sheet: use the Impect-inferred goals, cards and subs
-        found=metrics.timeline(events,str(events["homeSquadName"].iloc[0]),str(events["awaySquadName"].iloc[0]))
-        timeline_by_team=[(team,team==subject,[{"minute":e.minute,"kind":e.kind,"player":e.label}
-                                               for e in found if e.team==team]) for team in (subject,opponent)]
+def _flow_timeline(events: pd.DataFrame, dvms_match, subject: str, opponent: str) -> str:
+    """Territory flow (tracking) or Impect momentum (fallback), for the overview's match-flow panel."""
     wave=None
     if dvms_match is not None:
         from src.report import metrics_dvms
@@ -1107,11 +1102,19 @@ def _flow_timeline(events: pd.DataFrame, dvms_match, timeline_by_team, subject: 
         except Exception:
             wave=None
     if wave is not None:
-        return overview_mod.flow_timeline_chart(wave["minute"],wave["territory_m"],timeline_by_team,
+        return overview_mod.flow_timeline_chart(wave["minute"],wave["territory_m"],
                                                 y_label="Territory (m from halfway)")
     momentum=metrics.momentum(events,subject,opponent)
-    return overview_mod.flow_timeline_chart(momentum["minute"],momentum["momentum"],timeline_by_team,
-                                            y_label="Net threat (rolling)")
+    return overview_mod.flow_timeline_chart(momentum["minute"],momentum["momentum"],y_label="Net threat (rolling)")
+
+
+def _match_timeline(events: pd.DataFrame, timeline_by_team, subject: str, opponent: str) -> str:
+    """Goals, cards and substitutions of both teams on one strip."""
+    if timeline_by_team is None:      # no DVMS team sheet: use the Impect-inferred goals, cards and subs
+        found=metrics.timeline(events,str(events["homeSquadName"].iloc[0]),str(events["awaySquadName"].iloc[0]))
+        timeline_by_team=[(team,team==subject,[{"minute":e.minute,"kind":e.kind,"player":e.label}
+                                               for e in found if e.team==team]) for team in (subject,opponent)]
+    return overview_mod.timeline_chart(timeline_by_team)
 
 
 def build_context(impect_match_id: int, dvms_match_id: str | None = None) -> dict[str, Any]:
@@ -1168,7 +1171,8 @@ def build_context(impect_match_id: int, dvms_match_id: str | None = None) -> dic
             dvms_match.f7,dvms_match.f24.events,dvms_match.avg_positions,
             lambda x,y:metrics_dvms._metres_to_adj(x,y,dvms_match.meta),events,subject)
     has_sheet=bool(overview_ctx)
-    flow_timeline_img=_flow_timeline(events,dvms_match,overview_ctx.get("timeline_by_team"),subject,opponent)
+    flow_timeline_img=_flow_timeline(events,dvms_match,subject,opponent)
+    timeline_img=_match_timeline(events,overview_ctx.get("timeline_by_team"),subject,opponent)
     page_plan=build_page_plan(tracked,has_sheet)
     context.update({
         "generated_date":dt.date.today().strftime("%d %B %Y"),
@@ -1184,7 +1188,7 @@ def build_context(impect_match_id: int, dvms_match_id: str | None = None) -> dic
         "match_highlights":_match_highlights(charlton_match_values,baseline,subject,opponent,speed_subject,speed_opponent),
         "xg_race_img":_xg_race(events,teams),
         "threat_density_img":threat_density_img,"threat_density_kpis":threat_density_kpis,
-        "flow_timeline_img":flow_timeline_img,
+        "flow_timeline_img":flow_timeline_img,"timeline_img":timeline_img,
         "entries_kpis":entries_kpis,
         "chance_source_img":chance_source_img,"chance_source_kpis":chance_source_kpis,
         "player_threat_ranking_img":player_threat_ranking_img,

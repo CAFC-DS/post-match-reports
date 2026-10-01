@@ -53,7 +53,7 @@ _KPI_FIELDS = [
     "BYPASSED_OPPONENTS", "BYPASSED_DEFENDERS",
     # Opponents taken out of the game by the *receiver* on a RECEPTION event
     # (2026-09, analyst report: "where players received the ball").
-    "BYPASSED_OPPONENTS_RECEIVING", "BYPASSED_DEFENDERS_RECEIVING",
+    "BYPASSED_OPPONENTS_RECEIVING",
 ]
 
 _EVENTS_SQL = """

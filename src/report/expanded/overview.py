@@ -469,59 +469,82 @@ def _merge_substitutions(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
-def flow_timeline_chart(x, y, timeline_by_team: list[tuple[str, bool, list[dict[str, Any]]]], *,
-                        y_label: str = "Territory (m)") -> str:
-    """Match flow and timeline in one chart.
+def _style_time_axis(ax, font: float) -> None:
+    """The 0-98 minute axis shared by the flow chart, the timeline and the xG race,
+    so their x-axes line up when they are printed under one another."""
+    from src.report import palette
 
-    The rolling territory wave (``y`` > 0 is the subject's attacking half, red;
-    below zero is the opponent's, grey) with each team's goals, cards and
-    substitutions marked above (subject) and below (opponent) it on the same
-    0-98 minute axis. The figure width and margins match the xG race drawn
-    beneath it so the two x-axes line up.
+    ax.set_xlim(0, X_AXIS_MAX)
+    ax.set_xticks(X_AXIS_TICKS)
+    ax.set_xticklabels(X_AXIS_LABELS)
+    ax.tick_params(labelsize=font, colors=palette.MUTED, length=0)
+    ax.spines[["top", "right", "left"]].set_visible(False)
+    ax.spines["bottom"].set_color(palette.HAIR)
+    ax.axvline(45, color=palette.HAIR, linewidth=1.0, linestyle=(0, (3, 3)), zorder=1)
 
-    Everything is set in one type scale at print size (the figure is shown at
-    about two thirds of its width): labels, ticks, axis label and legend share
-    a size, and only goals are bold.
+
+def flow_timeline_chart(x, y, *, y_label: str = "Territory (m)") -> str:
+    """Match flow: the rolling territory wave (``y`` > 0 is the subject's
+    attacking half, red; below zero is the opponent's, grey) on the 0-98 minute
+    axis. The figure width and margins match the timeline and the xG race, so
+    the x-axes line up. Set at print size (the figure is shown at about two
+    thirds of its width)."""
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    from src.report import palette
+
+    font = 10.5
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+    peak = max(float(np.abs(y).max()) if len(y) else 0.0, 5.0)
+    fig, ax = plt.subplots(figsize=(16.0, 3.9), facecolor=palette.PAPER)
+    fig.subplots_adjust(left=0.07, right=0.99, top=0.97, bottom=0.12)
+    ax.set_facecolor(palette.PAPER)
+    ax.fill_between(x, y, 0, where=y >= 0, interpolate=True, color=palette.CHARLTON_RED, alpha=.9, linewidth=0, zorder=3)
+    ax.fill_between(x, y, 0, where=y <= 0, interpolate=True, color=palette.OPPONENT_GREY, alpha=.85, linewidth=0, zorder=3)
+    ax.plot(x, y, color=palette.INK, linewidth=.7, alpha=.35, zorder=4)
+    ax.axhline(0, color=palette.INK, linewidth=1.0, zorder=5)
+    _style_time_axis(ax, font)
+    ax.set_ylim(-peak * 1.2, peak * 1.2)
+    ax.set_ylabel(y_label, fontsize=font, color=palette.MUTED)
+    return _png_uri(fig, tight=False, dpi=200)
+
+
+def timeline_chart(timeline_by_team: list[tuple[str, bool, list[dict[str, Any]]]]) -> str:
+    """Match timeline: each team's goals, cards and substitutions on the 0-98
+    minute axis, the subject above the line and the opponent below it.
+
+    One type scale (goals bold, everything else regular); substitutions at the
+    same minute share one label; labels stack on three levels so they never
+    overlap and late events are pulled inside the axis.
 
     ``timeline_by_team`` is ``[(team name, is_subject, events), ...]`` as
     returned by :func:`timeline_events`.
     """
     import matplotlib.patheffects as pe
     import matplotlib.pyplot as plt
-    import numpy as np
     from matplotlib.patches import FancyBboxPatch
 
     from src.report import palette
 
-    font = 10.5
-    x_max = X_AXIS_MAX
-    x = np.asarray(x, dtype=float)
-    y = np.asarray(y, dtype=float)
-    peak = max(float(np.abs(y).max()) if len(y) else 0.0, 5.0)
-    fig, ax = plt.subplots(figsize=(16.0, 4.6), facecolor=palette.PAPER)
-    fig.subplots_adjust(left=0.07, right=0.99, top=0.98, bottom=0.12)
+    font, levels, x_max = 10.5, 3, X_AXIS_MAX
+    base, label_gap, step = .55, .3, .42          # in marker units: lane offset, label offset, label level spacing
+    fig, ax = plt.subplots(figsize=(16.0, 2.35), facecolor=palette.PAPER)
+    fig.subplots_adjust(left=0.07, right=0.99, top=0.99, bottom=0.24)
     ax.set_facecolor(palette.PAPER)
-    ax.fill_between(x, y, 0, where=y >= 0, interpolate=True, color=palette.CHARLTON_RED, alpha=.9, linewidth=0, zorder=3)
-    ax.fill_between(x, y, 0, where=y <= 0, interpolate=True, color=palette.OPPONENT_GREY, alpha=.85, linewidth=0, zorder=3)
-    ax.plot(x, y, color=palette.INK, linewidth=.7, alpha=.35, zorder=4)
+    _style_time_axis(ax, font)
+    ax.set_ylim(-2.35, 2.35)
+    ax.set_yticks([])
+    ax.spines["bottom"].set_visible(False)
     ax.axhline(0, color=palette.INK, linewidth=1.0, zorder=5)
-    ax.axvline(45, color=palette.HAIR, linewidth=1.0, linestyle=(0, (3, 3)), zorder=1)
-    ax.set_xlim(0, x_max)
-    ax.set_ylim(-peak * 2.9, peak * 2.9)
-    ax.set_xticks(X_AXIS_TICKS)
-    ax.set_xticklabels(X_AXIS_LABELS)
-    ax.tick_params(labelsize=font, colors=palette.MUTED, length=0)
-    ax.set_ylabel(y_label, fontsize=font, color=palette.MUTED)
-    ax.spines[["top", "right", "left"]].set_visible(False)
-    ax.spines["bottom"].set_color(palette.HAIR)
 
     halo = [pe.withStroke(linewidth=2.6, foreground=palette.PAPER)]
-    base, step = peak * 1.3, peak * .34
     char_w = .56                       # width of one character in minutes at this size
     for lane, (team, is_subject, events) in enumerate(timeline_by_team):
         sign = 1 if lane == 0 else -1
         colour = palette.CHARLTON_RED if is_subject else palette.OPPONENT_GREY
-        right_edge = [-99.0] * 4       # where each label level is already occupied up to
+        right_edge = [-99.0] * levels  # where each label level is already occupied up to
         for e in _merge_substitutions(events):
             m, kind = min(float(e["minute"]), x_max - 1.6), e["kind"]
             y0 = sign * base
@@ -529,7 +552,7 @@ def flow_timeline_chart(x, y, timeline_by_team: list[tuple[str, bool, list[dict[
                 ax.scatter([m], [y0], s=170, c=colour, edgecolors=palette.PAPER, linewidths=1.3, zorder=6)
             elif kind in ("yellow", "red"):
                 face = "#e0b12a" if kind == "yellow" else palette.CHARLTON_RED_DARK
-                ax.add_patch(FancyBboxPatch((m - .55, y0 - peak * .17), 1.1, peak * .34, boxstyle="round,pad=0,rounding_size=.15",
+                ax.add_patch(FancyBboxPatch((m - .55, y0 - .2), 1.1, .4, boxstyle="round,pad=0,rounding_size=.15",
                                             facecolor=face, edgecolor="none", zorder=6))
             else:
                 ax.scatter([m], [y0], s=95, marker="^" if sign > 0 else "v", c=palette.SUCCESS_GREEN,
@@ -537,16 +560,20 @@ def flow_timeline_chart(x, y, timeline_by_team: list[tuple[str, bool, list[dict[
             text = f"{e['player']} {int(e['minute'])}'"
             half = len(text) * char_w / 2
             centre = min(max(m, half + .3), x_max - half - .3)       # keep the label inside the axes
-            level = next((i for i in range(4) if centre - half > right_edge[i] + .8), 3)
+            level = next((i for i in range(levels) if centre - half > right_edge[i] + .8), levels - 1)
             right_edge[level] = centre + half
-            ax.text(centre, sign * (base + peak * .36 + level * step), text, ha="center",
+            ax.text(centre, sign * (base + label_gap + level * step), text, ha="center",
                     va="bottom" if sign > 0 else "top", fontsize=font, zorder=7, path_effects=halo,
                     fontweight="bold" if kind == "goal" else "normal",
                     color=colour if kind == "goal" else palette.INK)
-    for i, (label, face, marker) in enumerate((("goal", palette.INK, "\u25cf"), ("yellow card", "#c99a1c", "\u25a0"),
-                                               ("red card", palette.CHARLTON_RED_DARK, "\u25a0"),
-                                               ("substitution (player on)", palette.SUCCESS_GREEN, "\u25b2"))):
-        fig.text(0.56 + i * 0.11, 0.012, f"{marker} {label}", fontsize=font, color=face, ha="left")
+    legend = [(f"{timeline_by_team[0][0]} (above)", palette.CHARLTON_RED, "\u25cf"),
+              (f"{timeline_by_team[1][0]} (below)", palette.OPPONENT_GREY, "\u25cf")] if len(timeline_by_team) > 1 else []
+    legend += [("goal", palette.INK, "\u25cf"), ("yellow card", "#c99a1c", "\u25a0"),
+               ("red card", palette.CHARLTON_RED_DARK, "\u25a0"), ("substitution (player on)", palette.SUCCESS_GREEN, "\u25b2")]
+    x0 = 0.07
+    for label, face, marker in legend:
+        fig.text(x0, 0.015, f"{marker} {label}", fontsize=font, color=face, ha="left")
+        x0 += 0.012 * len(label) * .62 + 0.04
     return _png_uri(fig, tight=False, dpi=200)
 
 

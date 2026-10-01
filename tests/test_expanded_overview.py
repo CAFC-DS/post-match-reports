@@ -154,7 +154,7 @@ def test_simultaneous_substitutions_share_one_label():
     assert [e["kind"] for e in merged] == ["sub", "yellow", "sub"]
 
 
-def test_flow_timeline_chart_renders_with_late_events_and_shares_the_xg_axis():
+def test_flow_and_timeline_charts_render_with_late_events_and_share_the_xg_axis():
     x = np.linspace(0, 96, 97)
     y = 20 * np.sin(x / 9)
     events = [("Charlton Athletic", True, [{"minute": 28.0, "kind": "goal", "player": "Campbell"},
@@ -163,7 +163,8 @@ def test_flow_timeline_chart_renders_with_late_events_and_shares_the_xg_axis():
               ("Cardiff City", False, [{"minute": 60.0, "kind": "goal", "player": "Moylan"},
                                        {"minute": 81.7, "kind": "sub", "player": "Scanlon"},
                                        {"minute": 82.0, "kind": "sub", "player": "Lawlor"}])]
-    assert ov.flow_timeline_chart(x, y, events).startswith("data:image/png;base64,")
-    assert ov.flow_timeline_chart(x, y * 0, [("Charlton Athletic", True, []), ("Cardiff City", False, [])],
-                                  y_label="Net threat").startswith("data:image/png")
+    assert ov.flow_timeline_chart(x, y).startswith("data:image/png;base64,")
+    assert ov.flow_timeline_chart(x, y * 0, y_label="Net threat").startswith("data:image/png")
+    assert ov.timeline_chart(events).startswith("data:image/png;base64,")
+    assert ov.timeline_chart([("Charlton Athletic", True, []), ("Cardiff City", False, [])]).startswith("data:image/png")
     assert ov.X_AXIS_MAX > 96 and ov.X_AXIS_TICKS[-1] == 90

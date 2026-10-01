@@ -10,7 +10,7 @@ def _events(rows):
     base = dict(squadName=CHA, playerName="Some Player", actionType="PASS", action="LOW_PASS", result="SUCCESS",
                 startAdjCoordinatesX=0.0, startAdjCoordinatesY=0.0, endAdjCoordinatesX=0.0, endAdjCoordinatesY=0.0,
                 startPitchPosition="MIDDLE", endPitchPosition="MIDDLE", startPackingZone="CMC", endPackingZone="CMC",
-                BYPASSED_OPPONENTS=0.0, BYPASSED_DEFENDERS=0.0, BYPASSED_OPPONENTS_RECEIVING=0.0, BYPASSED_DEFENDERS_RECEIVING=0.0, PXT_ATTACK=0.0,
+                BYPASSED_OPPONENTS=0.0, BYPASSED_DEFENDERS=0.0, BYPASSED_OPPONENTS_RECEIVING=0.0, PXT_ATTACK=0.0,
                 eventId=0)
     return pd.DataFrame([{**base, **r, "eventId": i} for i, r in enumerate(rows)])
 
@@ -59,7 +59,7 @@ def test_threat_zone_values_keep_positive_open_play_threat_only():
 def test_reception_summary_categories_roles_and_players():
     rec = dict(actionType="RECEPTION")
     events = _events([
-        dict(rec, action="AVAILABILITY_BTL", playerName="A One", startPackingZone="AMC", BYPASSED_OPPONENTS_RECEIVING=2.0, BYPASSED_DEFENDERS_RECEIVING=1.0, PXT_ATTACK=0.03),
+        dict(rec, action="AVAILABILITY_BTL", playerName="A One", startPackingZone="AMC", BYPASSED_OPPONENTS_RECEIVING=2.0, PXT_ATTACK=0.03),
         dict(rec, action="AVAILABILITY_BTL", playerName="A One", startPackingZone="AML", BYPASSED_OPPONENTS_RECEIVING=1.0, PXT_ATTACK=-0.01),
         dict(rec, action="AVAILABILITY_OUT_WIDE", playerName="B Two", startPackingZone="WL"),
         dict(rec, action="HOLD_UP_PLAY", playerName="B Two", startPackingZone="IBC", BYPASSED_OPPONENTS_RECEIVING=1.0),
@@ -75,16 +75,16 @@ def test_reception_summary_categories_roles_and_players():
     assert out["receptions_by_role"]["AM"] == 2.0 and out["receptions_by_role"]["WL"] == 1.0
     assert [p["name"] for p in out["players"]] == ["One", "Two", "Three"]      # by bypassed, then receptions
     top = out["players"][0]
-    assert top["receptions"] == 2 and top["bypassed"] == 3 and abs(top["xt"] - 0.03) < 1e-9   # negative xT not counted
-    assert out["defenders"] == 1 and out["defenders_by_role"]["AM"] == 1.0 and top["defenders"] == 1
-    assert out["top_opponents"].to_dict() == {"One": 3.0, "Two": 1.0}      # players who bypassed nobody are left out
-    assert out["top_defenders"].to_dict() == {"One": 1.0}
+    assert top["receptions"] == 2 and top["bypassed"] == 3
+    assert top["by_category"]["Between the lines"] == 2 and top["by_category"]["Out wide"] == 0
+    two = out["players"][1]
+    assert two["name"] == "Two" and two["by_category"]["Out wide"] == 1 and two["by_category"]["Hold-up play"] == 1
 
 
 def test_reception_summary_tolerates_missing_kpi_column_and_no_receptions():
     events = _events([dict(actionType="RECEPTION", action="HOLD_UP_PLAY", playerName="A One")])
-    out = ip.reception_summary(events.drop(columns=["BYPASSED_OPPONENTS_RECEIVING", "BYPASSED_DEFENDERS_RECEIVING"]), CHA)
-    assert out["total"] == 1 and out["bypassed"] == 0 and out["defenders"] == 0 and len(out["top_opponents"]) == 0
+    out = ip.reception_summary(events.drop(columns=["BYPASSED_OPPONENTS_RECEIVING"]), CHA)
+    assert out["total"] == 1 and out["bypassed"] == 0
     empty = ip.reception_summary(_events([dict(action="LOW_PASS")]), CHA)
     assert empty["total"] == 0 and empty["players"] == [] and empty["values"] == {}
 
@@ -136,9 +136,6 @@ def test_charts_render_to_data_uris():
     assert ip.packing_zone_chart({}, "#7d7869", vmax=0.0, decimals=2).startswith("data:image/png")
     assert ip.packing_zone_chart(values, "#d01012", vmax=101.0, label_prefix="To ", small=True).startswith(
         "data:image/png")
-    summary = ip.reception_summary(_events([dict(actionType="RECEPTION", action="HOLD_UP_PLAY", playerName="A One",
-                                                 BYPASSED_OPPONENTS_RECEIVING=2.0)]), CHA)
-    assert ip.reception_bars_chart(summary, "#d01012").startswith("data:image/png")
     givers = ip.entry_givers(_events([dict(playerName="A One", endPitchPosition="FINAL_THIRD")]), CHA)
     assert ip.entry_givers_chart(givers, "#d01012").startswith("data:image/png")
     panels = ip.player_threat_panels(_events([dict(playerName="A One", PXT_ATTACK=0.1)]), CHA)

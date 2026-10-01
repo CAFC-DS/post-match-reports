@@ -80,13 +80,14 @@ def _stub_context(tracked: bool, team_sheet: bool = True) -> dict:
         threat_density_kpis={t: {"pxt": "1.00", "actions": 7} for t in teams},
         threat_zone_img={t: "" for t in teams},
         threat_zone_kpis={t: {"total": "1.00", "actions": 5} for t in teams},
-        reception_ctx={t: {"img": "", "bars": "", "total": 3, "bypassed": 2,
+        reception_ctx={t: {"img": "", "total": 3, "bypassed": 2,
                            "categories": [{"label": "Out wide", "n": 3}],
-                           "players": [{"name": "One", "receptions": 3, "bypassed": 2, "xt": 0.05}]} for t in teams},
+                           "players": [{"name": "One", "receptions": 3, "bypassed": 2, "by_category": {"Out wide": 3}}]} for t in teams},
         player_threat_ctx={t: {"img": "", "created": "0.54", "passing": "0.39", "carrying": "0.15",
                                "receiving": "0.44"} for t in teams},
         entry_givers_ctx={t: {"img": "", "n_final_third": 1, "n_box": 1} for t in teams},
         flow_timeline_img="",
+        timeline_img="",
         line_breaks_available=True,
         contents=build_contents(plan, teams[0], tracked, team_sheet),
     )
@@ -143,10 +144,11 @@ def test_template_renders_the_in_possession_panels():
     for text in ("Passing Networks & Progression", "PROGRESSION", "3 defenders", "Where Players Received The Ball",
                  "Who received it", "Threat Creation & Player Threat", "Threat density", "Threat by role zone",
                  "Player threat", "Final Third & Box Entries", "WHO GOT THE BALL THERE",
-                 "Match Flow, Territory & Timeline"):
+                 "Match Flow & Territory"):
         assert text in html, text
     assert "<b>50%</b> through" in html and "<b>30%</b> over" in html and "<b>20%</b> around" in html
-    assert "Match Timeline" not in html
+    assert html.count("Match Timeline") == 1          # one timeline panel: on the team-sheet page
+    assert "Opponents bypassed</th>" in html and "Match Flow &amp; Territory" in html or "Match Flow & Territory" in html
     assert html.count("Player Threat") == 1          # one page, no separate player-threat page
 
 
