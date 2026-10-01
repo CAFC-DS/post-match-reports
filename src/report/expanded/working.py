@@ -24,7 +24,7 @@ from src.report.render_combined import build_context as build_shared_context
 from src.report.expanded import _fonts
 from src.report.expanded import season_baseline as sb
 from src.report.expanded import inpossession as inpossession_mod
-from src.report.expanded import bookmarks
+from src.report.expanded import bookmarks, layout_check
 from src.report.expanded import gamestate as gamestate_mod
 from src.report.expanded import summary as summary_mod
 from src.report.expanded import outofpossession as outofpossession_mod
@@ -1034,6 +1034,13 @@ def render_report(impect_match_id: int, dvms_match_id: str | None, output_path: 
     output_path.parent.mkdir(parents=True,exist_ok=True)
     chrome = resolve_chrome(chrome_bin)
     print(f"Rendering with {chrome_version(chrome)} ({chrome})")
+    problems=layout_check.find_overflow(html,chrome)
+    if problems:
+        message=f"Layout overflow: {layout_check.describe(problems)}"
+        if os.environ.get("REPORT_ALLOW_LAYOUT_OVERFLOW")=="1":
+            print(f"warning: {message}")
+        else:
+            raise layout_check.LayoutOverflowError(message+" (set REPORT_ALLOW_LAYOUT_OVERFLOW=1 to render anyway)")
     with tempfile.TemporaryDirectory(prefix="expanded-report-") as tmp:
         html_path=Path(tmp)/"report.html"
         html_path.write_text(html,encoding="utf-8")

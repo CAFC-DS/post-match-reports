@@ -31,8 +31,7 @@ from matplotlib.patches import Rectangle
 from src.report import metrics, palette, pitch
 
 # Coarse role groups of Impect's packing zones (left/centre/right merged where
-# the split carries little). Same decode as expanded/metrics/in_possession.py,
-# copied because that module is not importable.
+# the split carries little).
 PACKING_ZONE_GROUPS: dict[str, str] = {
     "GKC": "GK", "GKL": "GK", "GKR": "GK",
     "CBL": "CB", "CBR": "CB", "CBC": "CB",

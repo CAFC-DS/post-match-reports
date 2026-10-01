@@ -397,3 +397,10 @@ generated PDF filename. Use a scratch directory instead, and only write to
 `outputs/` once you're confident in the result (the true reference is
 additionally preserved at `recovery/reference/verified_original/`
 regardless).
+
+
+## Dead code removed (Phase 6E)
+
+`src/report/expanded/render.py` and `src/report/expanded/metrics/` (see the note above: they imported modules that
+never existed and could not be imported) were deleted with the user's sign-off. `tests/test_imports.py` now imports
+every module under `src/` and `post_match_reports/`, so a broken module fails CI instead of lingering.
