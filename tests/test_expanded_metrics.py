@@ -5,26 +5,6 @@ from src.report.expanded import working
 from src.report import impect_cafcdb_source
 
 
-def test_duel_split_kpis_reports_type_share_and_most_involved():
-    duels = pd.DataFrame(
-        [
-            ("Charlton", "AERIAL", "Lloyd Jones"),
-            ("Charlton", "GROUND", "Lloyd Jones"),
-            ("Charlton", "GROUND", "Conor Coventry"),
-            ("Opponent", "GROUND", "Someone Else"),
-        ],
-        columns=["squadName", "duel_type", "playerName"],
-    )
-
-    result = working._duel_split_kpis(duels, "Charlton")
-
-    assert result == {
-        "aerial_pct": 33,
-        "ground_pct": 67,
-        "most_involved": "Jones 2 · Coventry 1",
-    }
-
-
 def test_player_threat_ranking_uses_positive_open_play_threat(monkeypatch):
     monkeypatch.setattr(working, "_uri_fixed", lambda figure: "chart")
     events = pd.DataFrame(

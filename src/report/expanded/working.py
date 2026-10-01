@@ -24,6 +24,7 @@ from src.report.render_combined import build_context as build_shared_context
 from src.report.expanded import _fonts
 from src.report.expanded import season_baseline as sb
 from src.report.expanded import inpossession as inpossession_mod
+from src.report.expanded import outofpossession as outofpossession_mod
 from src.report.expanded import shooting as shooting_mod
 from src.report.expanded import overview as overview_mod
 from src.report.expanded.pages import build_contents, build_page_plan, section_info
@@ -236,53 +237,6 @@ def _event_map(frame: pd.DataFrame, color: str, title: str = "") -> str:
     return _uri(fig)
 
 
-def _pressure_activity(pressure_events: pd.DataFrame, events: pd.DataFrame) -> tuple[str, dict[str, Any]]:
-    """Full-pitch pressure-density heatmap plus the KPI strip underneath it.
-
-    ``pressure_events`` rows are located at the ball carrier's own adjusted
-    coordinates (the carrier being pressed, not the presser), so they run in
-    the *opponent's* attacking direction. Negate both axes to express them
-    in the pressing team's own attacking frame before plotting or deriving
-    territory share, matching the convention already used by the working
-    single-team event maps elsewhere in this module.
-
-    Drawn on a VERTICAL pitch, matching the reference exactly (recovery/
-    reference/verified_original page 12, embedded raster xref 174) -- the
-    prior version used a horizontal pitch, a real structural mismatch, not
-    just a colouring difference.
-    """
-    x = -pd.to_numeric(pressure_events["startAdjCoordinatesX"], errors="coerce")
-    y = -pd.to_numeric(pressure_events["startAdjCoordinatesY"], errors="coerce")
-    pitch_obj = VerticalPitch(pad_top=1, pad_bottom=1, pad_left=1, pad_right=1, **_heatmap_pitch_kwargs())
-    fig, ax = pitch_obj.draw(figsize=(5.6, 8.6))
-    fig.set_facecolor(palette.PAPER_2)
-    px, py = pitch._to_pitch(x, y)
-    bin_stat = pitch_obj.bin_statistic(px, py, statistic="count", bins=(20, 30))
-    bin_stat["statistic"] = gaussian_filter(bin_stat["statistic"], 1.6)
-    vmax = float(bin_stat["statistic"].max()) or 1.0
-    pitch_obj.heatmap(bin_stat, ax=ax, cmap=_THERMAL_CMAP, edgecolors="none", alpha=0.92,
-                       norm=PowerNorm(0.6, vmin=0, vmax=vmax), zorder=1)
-
-    top = pressure_events.groupby("playerName").size().sort_values(ascending=False)
-    n = len(pressure_events)
-    # Forced turnover rate: of the actions this team pressed, what share did
-    # the ball carrier actually lose (result == FAIL)? Replaces "opposition-
-    # half share", which just restated where the team's press was applied --
-    # already shown by the heatmap itself -- without saying whether any of
-    # it actually worked.
-    pressed_results = pressure_events.merge(events[["eventId", "result"]], on="eventId", how="left")
-    forced_pct = round(float((pressed_results["result"] == "FAIL").mean() * 100)) if n else 0
-    kpis = {
-        "pressure_n": n,
-        "forced_pct": forced_pct,
-        "opp_third_n": int((x > 17.5).sum()),
-        "per_min": round(n / 90, 1),
-        "top_name": str(top.index[0]).split()[-1] if len(top) else "—",
-        "top_n": int(top.iloc[0]) if len(top) else 0,
-    }
-    return _uri(fig), kpis
-
-
 def _local_passing_network_map(net: "metrics.PassingNetwork", max_edge_passes: int,
                                 max_abs_threat: float, max_abs_edge_pxt: float) -> str:
     """Report-local passing network chart: same underlying pitch-drawing
@@ -332,42 +286,6 @@ def _local_passing_network_map(net: "metrics.PassingNetwork", max_edge_passes: i
         ax.text(xi, yi, name, ha="center", va="center", zorder=5, fontsize=7.2,
                 fontweight="bold", color="white")
     return pitch._fig_to_uri(fig)
-
-
-def _duel_location_map(duels: pd.DataFrame, team: str, duel_type: str) -> str:
-    """Won/lost duel locations for one team, one duel type, on a full pitch
-    -- green dot = won, red cross = lost, matching the reference's page 12
-    legend. Coordinates come straight from load_duel_involvement, adjusted
-    to whichever player originally acted on that event (usually but not
-    always this team's own attacking direction) -- a documented
-    simplification, not a recovered original convention."""
-    t = duels.loc[(duels["squadName"] == team) & (duels["duel_type"] == duel_type)]
-    pitch_obj, fig, ax = pitch._vertical_pitch((5.0, 7.4))
-    won = t.loc[t["outcome"] == "WON"]
-    lost = t.loc[t["outcome"] == "LOST"]
-    for frame, marker, color in ((won, "o", palette.SUCCESS_GREEN), (lost, "X", palette.FAIL_REDGREY)):
-        if frame.empty: continue
-        x, y = pitch._to_pitch(frame["startAdjCoordinatesX"], frame["startAdjCoordinatesY"])
-        pitch_obj.scatter(x, y, ax=ax, s=46, color=color, marker=marker,
-                           edgecolors=palette.PAPER_2, linewidth=0.8, alpha=0.9, zorder=3)
-    return _uri(fig)
-
-
-def _duel_split_kpis(duels: pd.DataFrame, team: str) -> dict[str, Any]:
-    """Aerial/ground share of this team's total duel volume, and the three
-    players most involved in duels (either type, won or lost) -- the two
-    captions under the reference's page 12 duel-performance panel."""
-    t = duels.loc[duels["squadName"] == team]
-    n = len(t)
-    aerial_n = int((t["duel_type"] == "AERIAL").sum())
-    ground_n = int((t["duel_type"] == "GROUND").sum())
-    top = t.groupby("playerName").size().sort_values(ascending=False).head(3)
-    most_involved = " · ".join(f"{name.split()[-1]} {int(count)}" for name, count in top.items())
-    return {
-        "aerial_pct": round(aerial_n / n * 100) if n else 0,
-        "ground_pct": round(ground_n / n * 100) if n else 0,
-        "most_involved": most_involved,
-    }
 
 
 def _entries_kpis(events: pd.DataFrame, team: str) -> dict[str, Any]:
@@ -779,7 +697,7 @@ def _duel_bars_by_type(duels: pd.DataFrame, charlton: str, opponent: str, duel_t
     x_max = 15.0
 
     fig, axes = plt.subplots(1, 2, figsize=(18.5, 5.7), facecolor=palette.PAPER)
-    fig.subplots_adjust(left=0.08, right=0.98, top=0.82, bottom=0.1, wspace=0.3)
+    fig.subplots_adjust(left=0.08, right=0.93, top=0.82, bottom=0.1, wspace=0.42)
     fig.text(0.5, 0.96, "LOST  ←            →  WON", ha="center", va="top", fontsize=12, color=palette.MUTED)
     for ax, team, frame in zip(axes, (charlton, opponent), (c, o)):
         ax.set_facecolor(palette.PAPER)
@@ -813,19 +731,24 @@ def _duel_bars_by_type(duels: pd.DataFrame, charlton: str, opponent: str, duel_t
             for yi, w, l in zip(y, frame["won"], frame["lost"]):
                 if l: ax.text(-l - x_max * 0.035, yi, f"{int(l)}", ha="right", va="center", fontsize=11, fontweight="bold", color=palette.FAIL_REDGREY)
                 if w: ax.text(w + x_max * 0.035, yi, f"{int(w)}", ha="left", va="center", fontsize=11, fontweight="bold", color=palette.SUCCESS_GREEN)
+        for yi, row in zip(y, frame.itertuples()):         # won / involved at the end of each row
+            ax.text(x_max * 1.05, yi, f"{int(row.won)}/{int(row.involvement)} · {row.won / row.involvement * 100:.0f}%",
+                    ha="left", va="center", fontsize=11, fontweight="bold", color=palette.INK, clip_on=False)
         ax.set_yticks(y); ax.set_yticklabels(frame["surname"], fontsize=12, fontweight="bold")
         ax.set_xlim(-x_max, x_max)
         ticks = [-15, -10, -5, 0, 5, 10, 15]
         ax.set_xticks(ticks); ax.set_xticklabels([str(abs(t)) for t in ticks], fontsize=9, color=palette.MUTED)
         ax.grid(axis="x", color=palette.HAIR_SOFT, lw=0.5, zorder=1)
         ax.axvline(0, color=palette.INK, lw=1, zorder=3)
-        title = team
+        team_all = d.loc[d["squadName"] == team]
+        n_won, n_all = int((team_all["outcome"] == "WON").sum()), len(team_all)
+        title = f"{team}\nDuels won: {n_won}/{n_all} ({n_won / n_all * 100 if n_all else 0:.0f}%)"
         if has_control:
             team_rows = d.loc[d["squadName"] == team]
             resolved = team_rows.loc[team_rows["control_resolved"]]
             controlled = int((resolved["team_controlled"] == True).sum())  # noqa: E712
             rate = controlled / len(resolved) * 100 if len(resolved) else 0.0
-            title += f"\nPost-duel control: {controlled}/{len(resolved)} ({rate:.0f}%)"
+            title += f" · post-duel control: {controlled}/{len(resolved)} ({rate:.0f}%)"
         ax.set_title(title, fontsize=13, fontweight="bold", pad=10,
                      color=palette.CHARLTON_RED if team == charlton else palette.OPPONENT_GREY)
         ax.spines[:].set_visible(False)
@@ -1162,7 +1085,7 @@ def build_context(impect_match_id: int, dvms_match_id: str | None = None) -> dic
     speed_opponent=_transition_speed_mps(events,opponent,dvms_match)
     threat_density_img,threat_density_kpis=_threat_density_maps(events,teams)
     entries_kpis=_entries_kpis(events,subject)
-    pressure_img,pressure_kpis=_pressure_activity(pressure_events.loc[pressure_events["squadName"]==subject],events)
+    ooc_ctx=outofpossession_mod.outofpossession_context(events,duel_involvement,pressure_events,subject,opponent)
     transition_img,transition_kpis=_transition_response_map(events,subject,opponent)
     tracked=bool(context["tracked_shapes"])
     overview_ctx: dict[str, Any]={}
@@ -1195,10 +1118,7 @@ def build_context(impect_match_id: int, dvms_match_id: str | None = None) -> dic
         "chance_source_img":chance_source_img,"chance_source_kpis":chance_source_kpis,
         "player_threat_ranking_img":player_threat_ranking_img,
         "player_threat_ranking_totals":player_threat_ranking_totals,
-        "pressure_img":pressure_img,"pressure_kpis":pressure_kpis,
-        "ground_duel_img":_duel_location_map(duel_involvement,subject,"GROUND"),
-        "aerial_duel_img":_duel_location_map(duel_involvement,subject,"AERIAL"),
-        "duel_split_kpis":_duel_split_kpis(duel_involvement,subject),
+        **ooc_ctx,
         "regain_img":regain_img,"regain_kpis":regain_kpis,
         "second_ball_img":second_ball_img,"second_ball_kpis":second_ball_kpis,
         "transition_img":transition_img,"transition_kpis":transition_kpis,
@@ -1207,7 +1127,7 @@ def build_context(impect_match_id: int, dvms_match_id: str | None = None) -> dic
         "duel_ground_bars_img":_duel_bars_by_type(
             duel_involvement,subject,opponent,"GROUND",events=events),
         "recovery_player_img":_bars(recovery_top6.index.tolist(),recovery_top6.values.tolist(),palette.CHARLTON_RED),
-        "event_counts":{"pressures":pressure_kpis["pressure_n"],"regains":regain_kpis["n"],"second_balls":second_ball_kpis["n"],"losses":transition_kpis["high_losses_n"]},
+        "event_counts":{"pressures":ooc_ctx["pressing_kpis"][subject]["n"],"regains":regain_kpis["n"],"second_balls":second_ball_kpis["n"],"losses":transition_kpis["high_losses_n"]},
         "big_chances":{
             team:[{"minute":str(r.gameTime).split(':')[0]+"'","player":str(r.playerName).split()[-1],"xg":float(r.SHOT_XG),
                    "xgot":(float(r.POSTSHOT_XG) if str(r.category) in ("Goal","On target") else None),
