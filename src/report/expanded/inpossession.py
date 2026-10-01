@@ -129,7 +129,8 @@ def reception_summary(events: pd.DataFrame, team: str, top: int = _SLOTS) -> dic
     receiving and ``defenders`` the defenders among them; ``xt`` is the
     positive threat credited to the reception event. ``players`` is sorted by
     opponents bypassed, then by receptions; ``top_opponents`` and
-    ``top_defenders`` are the per-receiver rankings drawn on the page."""
+    ``top_defenders`` are the per-receiver rankings and ``by_category`` the opponents
+    bypassed per reception location (between the lines, out wide...)."""
     t = events[(events["squadName"] == team) & (events["actionType"] == "RECEPTION")].copy()
     t["category"] = t["action"].map(RECEPTION_CATEGORIES)
     t = t[t["category"].notna()]
@@ -143,6 +144,9 @@ def reception_summary(events: pd.DataFrame, team: str, top: int = _SLOTS) -> dic
                                              defenders=("defenders", "sum"), xt=("xt", "sum"))
     ranked = per_player.sort_values(["bypassed", "receptions"], ascending=False)
 
+    by_category = pd.Series({c: float(t.loc[t["category"] == c, "bypassed"].sum())
+                             for c in RECEPTION_CATEGORIES.values()}).sort_values(ascending=False)
+
     def best(column: str) -> pd.Series:
         part = per_player[per_player[column] > 0][column].sort_values(ascending=False).head(top)
         return pd.Series(part.round().to_numpy(), index=[_surname(n) for n in part.index])
@@ -152,7 +156,7 @@ def reception_summary(events: pd.DataFrame, team: str, top: int = _SLOTS) -> dic
         "total": int(len(t)), "bypassed": int(round(float(t["bypassed"].sum()))),
         "defenders": int(round(float(t["defenders"].sum()))),
         "values": by_role, "defenders_by_role": def_by_role, "receptions_by_role": n_by_role,
-        "top_opponents": best("bypassed"), "top_defenders": best("defenders"),
+        "top_opponents": best("bypassed"), "top_defenders": best("defenders"), "by_category": by_category,
         "players": [{"name": _surname(n), "receptions": int(r.receptions), "bypassed": int(round(r.bypassed)),
                      "defenders": int(round(r.defenders)), "xt": float(r.xt)}
                     for n, r in ranked.head(5).iterrows()],
@@ -284,12 +288,14 @@ def entry_givers_chart(givers: dict[str, Any], colour: str) -> str:
 
 
 def reception_bars_chart(summary: dict[str, Any], colour: str) -> str:
-    """Who received the ball past opponents: opponents bypassed and, of those,
-    defenders bypassed, per receiver."""
+    """Opponents bypassed on receiving, by receiver and by where the ball was
+    received (reception count in brackets)."""
+    where = summary["by_category"].copy()
+    where.index = [f"{c} ({summary['counts'][c]})" for c in where.index]
     return _bar_panels_chart(
-        [("OPPONENTS BYPASSED", summary["top_opponents"], str(summary["bypassed"])),
-         ("DEFENDERS BYPASSED", summary["top_defenders"], str(summary["defenders"]))],
-        colour, _SLOTS, (7.6, 3.3), label_size=10.5)
+        [("BY RECEIVER", summary["top_opponents"], str(summary["bypassed"])),
+         ("BY LOCATION", where, str(summary["bypassed"]))],
+        colour, _SLOTS, (7.6, 4.2), label_size=10.5)
 
 
 def player_threat_chart(panels: dict[str, Any], colour: str) -> str:
@@ -299,7 +305,7 @@ def player_threat_chart(panels: dict[str, Any], colour: str) -> str:
         [("PASSING", panels["passing"], f"{panels['passing_total']:.2f}"),
          ("CARRYING", panels["carrying"], f"{panels['carrying_total']:.2f}"),
          ("RECEIVING", panels["receiving"], f"{panels['receiving_total']:.2f}")],
-        colour, _THREAT_SLOTS, (7.6, 4.0), decimals=3, label_size=9.6)
+        colour, _THREAT_SLOTS, (7.6, 4.9), decimals=3, label_size=9.6)
 
 
 # --------------------------------------------------------------------------- #
@@ -322,8 +328,7 @@ def inpossession_context(events: pd.DataFrame, subject: str, opponent: str) -> d
     reception_ctx, givers_ctx, player_threat_ctx = {}, {}, {}
     for t in teams:
         r = receptions[t]
-        sub = {g: f"{int(round(r['defenders_by_role'].get(g, 0.0)))} def."
-               for g, v in r["values"].items() if round(v) > 0}
+        sub = {g: f"{int(n)} received" for g, n in r["receptions_by_role"].items()}
         reception_ctx[t] = {
             "img": packing_zone_chart(r["values"], colour[t], rec_max, sub=sub),
             "bars": reception_bars_chart(r, colour[t]),

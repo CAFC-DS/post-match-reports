@@ -10,14 +10,12 @@ TEMPLATES = Path(__file__).resolve().parents[1] / "src" / "report" / "expanded" 
 
 
 def test_page_counts():
-    # The recovered report was 16 / 15 pages; the contents page and the receptions / threat
-    # pages add three. The team sheet (needs DVMS lineups) shares a page with the match flow.
-    assert build_page_plan(True)["total"] == 18
-    assert build_page_plan(False)["total"] == 17
+    # The recovered report was 16 / 15 pages; the contents page, the team-sheet
+    # page (needs DVMS lineups) and the receptions / threat pages add three.
+    assert build_page_plan(True)["total"] == 19
+    assert build_page_plan(False)["total"] == 18
     assert build_page_plan(True, has_team_sheet=False)["total"] == 18
-    no_sheet = build_page_plan(True, has_team_sheet=False)["pages"]
-    assert "ov_sheet" not in no_sheet and "ov_flow" in no_sheet
-    assert "ov_flow" not in build_page_plan(True)["pages"]
+    assert "ov_sheet" not in build_page_plan(True, has_team_sheet=False)["pages"]
 
 
 def test_pages_are_numbered_contiguously_with_section_labels():
@@ -26,15 +24,14 @@ def test_pages_are_numbered_contiguously_with_section_labels():
     assert numbers == list(range(1, plan["total"] + 1))
     assert plan["pages"]["contents"]["n"] == 1
     assert plan["pages"]["div_ip"]["label"] == "DIVIDER"
-    assert plan["pages"]["ov_sheet"]["label"] == "PAGE 1/2"
-    assert plan["pages"]["ov_stats"]["label"] == "PAGE 2/2"
+    assert plan["pages"]["ov_sheet"]["label"] == "PAGE 1/3"
     assert plan["pages"]["net"]["label"] == "PAGE 1/7"
     assert plan["pages"]["ip_receptions"]["label"] == "PAGE 4/7"
     assert plan["pages"]["ip_threat_zones"]["label"] == "PAGE 5/7"
     assert plan["pages"]["ip_shots"]["label"] == "PAGE 7/7"
     assert "net_0" not in plan["pages"] and "ip_player_threat" not in plan["pages"]
     assert plan["pages"]["oop_regains"]["label"] == "PAGE 3/3"
-    assert plan["sections"]["in_possession"] == {"first": 5, "last": 12}
+    assert plan["sections"]["in_possession"] == {"first": 6, "last": 13}
 
 
 def test_untracked_layout_merges_the_shape_pages():
@@ -83,7 +80,7 @@ def _stub_context(tracked: bool, team_sheet: bool = True) -> dict:
         threat_density_kpis={t: {"pxt": "1.00", "actions": 7} for t in teams},
         threat_zone_img={t: "" for t in teams},
         threat_zone_kpis={t: {"total": "1.00", "actions": 5} for t in teams},
-        reception_ctx={t: {"img": "", "bars": "", "total": 3, "bypassed": 2, "defenders": 1,
+        reception_ctx={t: {"img": "", "bars": "", "total": 3, "bypassed": 2,
                            "categories": [{"label": "Out wide", "n": 3}],
                            "players": [{"name": "One", "receptions": 3, "bypassed": 2, "xt": 0.05}]} for t in teams},
         player_threat_ctx={t: {"img": "", "created": "0.54", "passing": "0.39", "carrying": "0.15",
@@ -120,9 +117,9 @@ def test_contents_page_lists_every_section_with_its_page_span():
     plan = build_page_plan(True)
     rows = build_contents(plan, "Charlton Athletic", True, True)
     assert [r["title"] for r in rows] == ["Overview", "In Possession", "Out of Possession", "Transition"]
-    assert rows[0]["pages"] == "pages 2\u20134"
+    assert rows[0]["pages"] == "pages 2\u20135"
     assert "Where players received the ball" in rows[1]["items"]
-    assert "Match flow, xG race, team sheet & lineups" in rows[0]["items"]
+    assert "Team sheet, lineups & timeline" in rows[0]["items"]
     assert "Team-by-team tracked phase shapes" in rows[1]["items"]
     assert "Combined event-data average locations" in build_contents(
         build_page_plan(False), "Charlton Athletic", False, True)[1]["items"]
@@ -133,10 +130,10 @@ def test_template_renders_contents_and_team_sheet():
                       trim_blocks=True, lstrip_blocks=True)
     html = env.get_template("expanded.html.j2").render(**_stub_context(True))
     assert "what's in this report and where to find it" in html
-    assert "Match Overview" in html and "Match Flow, Territory &amp; Timeline" in html or "Match Flow, Territory & Timeline" in html
+    assert "Team Sheet, Lineups & Timeline" in html
     assert "Substitutes used" in html
     without = env.get_template("expanded.html.j2").render(**_stub_context(True, team_sheet=False))
-    assert "Match Overview" not in without and "Match Flow, Territory" in without
+    assert "Team Sheet, Lineups" not in without
 
 
 def test_template_renders_the_in_possession_panels():
@@ -153,14 +150,13 @@ def test_template_renders_the_in_possession_panels():
     assert html.count("Player Threat") == 1          # one page, no separate player-threat page
 
 
-def test_overview_page_shares_flow_xg_and_team_cards():
+def test_team_sheet_page_has_scorers_in_each_card():
     env = Environment(loader=FileSystemLoader(str(TEMPLATES)), autoescape=select_autoescape(["html"]),
                       trim_blocks=True, lstrip_blocks=True)
     html = env.get_template("expanded.html.j2").render(**_stub_context(True))
-    assert "half-time 1 \u2013 1" in html
+    assert "half-time 1 – 1" in html
     assert "<b>28'</b> Scorer" in html and "assist Setter" in html
     assert "Unused substitutes: Keeper, Spare" in html
-    assert html.count("Match Flow, Territory") == 1           # one flow panel: it lives on the team-sheet page
 
 
 def test_entries_fall_back_to_completion_when_there_is_no_line_break_data():
