@@ -24,10 +24,9 @@ from typing import Any
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from matplotlib.colors import to_rgba
-from matplotlib.patches import Rectangle
 
 from src.report import metrics, palette, pitch
+from src.report.expanded import packing_zones
 
 # Coarse role groups of Impect's packing zones (left/centre/right merged where
 # the split carries little).
@@ -41,19 +40,6 @@ PACKING_ZONE_GROUPS: dict[str, str] = {
     "WL": "WL", "WR": "WR",
     "IBWL": "IBWL", "IBWR": "IBWR", "IBL": "IB", "IBC": "IB", "IBR": "IB",
 }
-# Schematic layout, own goal on the left. (group, x0, x1, y0, y1, label) on a
-# 105 x 68 canvas; the attacker's left is the top edge.
-_ROLE_CELLS = [
-    ("GK", 0, 9, 0, 68, "GK"),
-    ("FBL", 9, 27, 45.33, 68, "Full-back"), ("CB", 9, 27, 22.67, 45.33, "Centre-back"),
-    ("FBR", 9, 27, 0, 22.67, "Full-back"),
-    ("DM", 27, 44, 0, 68, "Def. mid"),
-    ("CM", 44, 61, 0, 68, "Central mid"),
-    ("WL", 61, 82, 45.33, 68, "Wing"), ("AM", 61, 82, 22.67, 45.33, "Att. mid"), ("WR", 61, 82, 0, 22.67, "Wing"),
-    ("IBWL", 82, 105, 45.33, 68, "Box, wide"), ("IB", 82, 105, 22.67, 45.33, "In the box"),
-    ("IBWR", 82, 105, 0, 22.67, "Box, wide"),
-]
-
 # Impect reception tags kept for the category strip. Build-up receptions
 # (AVAILABILITY_IN_THE_BACK) and headers are left out, as in the U21 report.
 RECEPTION_CATEGORIES: dict[str, str] = {
@@ -190,47 +176,11 @@ def entry_givers(events: pd.DataFrame, team: str) -> dict[str, Any]:
 # --------------------------------------------------------------------------- #
 # Charts
 # --------------------------------------------------------------------------- #
-def _shade(colour: str, fraction: float) -> tuple[float, float, float, float]:
-    return to_rgba(colour, 0.08 + 0.72 * float(np.clip(fraction, 0, 1)))
-
-
 def packing_zone_chart(values: dict[str, float], colour: str, vmax: float, decimals: int = 0,
                        sub: dict[str, str] | None = None, label_prefix: str = "", small: bool = False) -> str:
-    """Role-line map: the twelve packing-zone groups as a schematic line-up, own
-    goal on the left. Each cell is shaded by its value against ``vmax`` (shared
-    by both teams) and prints the value; zero cells stay blank. ``sub`` adds a
-    small second line per cell and ``label_prefix`` (e.g. ``"TO "``) says the
-    zone is the role the ball *reached*. ``small`` draws the map at the size of a
-    half-page panel, with type set for that size rather than scaled down."""
-    size, label_font, value_font, sub_font, sub_gap = ((3.3, 2.2), 5.6, 10.0, 5.6, 7.6) if small else \
-                                                      ((6.6, 4.4), 9.2, 19.0, 9.0, 7.2)
-    fig, ax = plt.subplots(figsize=size, facecolor=palette.PAPER_2)
-    fig.subplots_adjust(0, 0, 1, 1)
-    ax.set_facecolor(palette.PAPER_2)
-    ax.set_xlim(-1, 106); ax.set_ylim(-1, 69); ax.set_aspect("equal"); ax.axis("off")
-    vmax = vmax or 1.0
-    units_per_pt = 107 / (size[0] * 72)
-    for group, x0, x1, y0, y1, label in _ROLE_CELLS:
-        v = float(values.get(group, 0.0))
-        shown = round(v, decimals) > 0
-        ax.add_patch(Rectangle((x0, y0), x1 - x0, y1 - y0, facecolor=_shade(colour, v / vmax if shown else 0),
-                               edgecolor=palette.PAPER, linewidth=1.4, zorder=1))
-        cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
-        dark = shown and v / vmax > .4
-        text = (label_prefix + label).upper()
-        if len(text) * label_font * 0.62 * units_per_pt > (x1 - x0) - 1.5:      # too wide for the cell: stack the words
-            text = text.replace(" ", "\n")
-        ax.text(cx, y1 - 2.2, text, ha="center", va="top", fontsize=label_font, linespacing=1.05,
-                fontweight="bold", color="white" if dark else palette.MUTED, zorder=3)
-        if shown:
-            ax.text(cx, cy, f"{v:.{decimals}f}", ha="center", va="center", fontsize=value_font, fontweight="bold",
-                    zorder=3, color="white" if v / vmax > .55 else palette.INK)
-            if sub and sub.get(group):
-                ax.text(cx, cy - sub_gap, sub[group], ha="center", va="center", fontsize=sub_font,
-                        color="white" if dark else palette.MUTED, zorder=3)
-    ax.add_patch(Rectangle((0, 0), 105, 68, fill=False, edgecolor=palette.INK, linewidth=1.0, zorder=4))
-    ax.annotate("", xy=(103, -0.2), xytext=(88, -0.2), arrowprops=dict(arrowstyle="-|>", color=palette.MUTED, lw=.9))
-    return pitch._fig_to_uri(fig)
+    """Packing-zone map drawn with IMPECT's own zone geometry (see ``packing_zones.zone_chart``)."""
+    return packing_zones.zone_chart(values, colour, vmax, decimals=decimals, sub=sub, label_prefix=label_prefix,
+                                    small=small)
 
 
 def _bar_panels_chart(panels: list[tuple[str, pd.Series, str]], colour: str, slots: int, figsize: tuple[float, float],
