@@ -59,3 +59,8 @@ def test_empty_events_do_not_break_the_summaries():
     empty = tr.losses(_events().iloc[0:0], A, B)
     assert tr.regain_speed(empty)["median_s"] is None and tr.punished(empty)["xg"] == 0
     assert tr.attacking(tr.regains(_events().iloc[0:0], A, B))["n"] == 0
+
+
+def test_losers_counts_players_whose_losses_were_followed_by_a_shot():
+    frame = tr.losses(_events(), A, B)
+    assert tr.losers(frame) == [{"name": "One", "n": 1}]

@@ -156,11 +156,17 @@ def attacking(frame: pd.DataFrame, top: int = 8) -> dict[str, Any]:
 ROWS = 5            # rows in the table under each pitch
 
 
-def _pitch_map(frame: pd.DataFrame, colour: str, top: int = ROWS) -> str:
+def losers(frame: pd.DataFrame, top: int = 4) -> list[dict[str, Any]]:
+    """Players whose ball losses were followed by an opponent shot (a ``losses`` frame)."""
+    counts = frame[frame["shots"] > 0]["player"].value_counts().head(top)
+    return [{"name": str(k), "n": int(v)} for k, v in counts.items()]
+
+
+def _pitch_map(frame: pd.DataFrame, colour: str, top: int = ROWS, vertical: bool = False) -> str:
     """Every event in grey; those followed by a shot as bubbles sized by xG; the costliest numbered."""
     from src.report import pitch
 
-    pitch_obj, fig, ax = pitch._horizontal_pitch((5.6, 3.6))
+    pitch_obj, fig, ax = pitch._vertical_pitch((3.4, 5.2)) if vertical else pitch._horizontal_pitch((5.6, 3.6))
     f = frame.dropna(subset=["x", "y"])
     if len(f):
         x, y = pitch._to_pitch(f["x"], f["y"])
@@ -171,7 +177,7 @@ def _pitch_map(frame: pd.DataFrame, colour: str, top: int = ROWS) -> str:
         pitch_obj.scatter(x, y, ax=ax, s=70 + hot["xg"].to_numpy() * 800, color=colour, alpha=.8,
                           edgecolors="white", zorder=3)
         for k, (px, py) in enumerate(zip(x.to_numpy()[:top], y.to_numpy()[:top]), 1):
-            ax.text(px, py, str(k), ha="center", va="center", fontsize=8, fontweight="bold", color="white", zorder=5)
+            ax.text(*((py, px) if vertical else (px, py)), str(k), ha="center", va="center", fontsize=8, fontweight="bold", color="white", zorder=5)
     return pitch._fig_to_uri(fig)
 
 
@@ -212,18 +218,15 @@ def transition_context(events: pd.DataFrame, subject: str, opponent: str) -> dic
     for t in teams:
         sp, p, a = speed[t], punish[t], attack[t]
         defending[t] = {
-            "kpis": [(p["n"], "balls lost"), (f"{sp['counterpress_pct']}%", "won back within 5 s"),
-                     (f"{sp['median_s']} s" if sp["median_s"] is not None else "–", "median time to regain"),
-                     (f"{p['xg']:.2f}", f"xG conceded ({p['shots']} shots)")],
-            "pitch": _pitch_map(lost[t], colour[t]),
-            "buckets": sp["buckets"], "counterpress": counterpress_players(lost[t], 6),
+            "summary": f"{p['n']} lost · {sp['counterpress_pct']}% won back within 5 s · {p['xg']:.2f} xG conceded ({p['shots']} shots)",
+            "pitch": _pitch_map(lost[t], colour[t], vertical=True), "buckets": sp["buckets"],
+            "median": f"{sp['median_s']} s" if sp["median_s"] is not None else "–",
+            "counterpress": counterpress_players(lost[t], 4), "by_third": p["by_third"], "losers": losers(lost[t]),
             "rows": _padded(costly_rows(t), ("n", "minute", "player", "zone", "back", "shots", "xg")),
             "xg_max": max([r["xg"] for r in costly_rows(t)] + [1e-9]),
         }
         attacking_ctx[t] = {
-            "kpis": [(a["n"], "balls won"), (f"{a['shot_pct']}%", "won ball → shot ≤ 15 s"),
-                     (f"{a['median_first_shot_s']} s" if a["median_first_shot_s"] is not None else "–", "median time to the shot"),
-                     (f"{a['xg']:.2f}", f"xG created ({a['shots']} shots)")],
+            "summary": f"{a['n']} won · {a['shot_pct']}% ended in a shot within 15 s · {a['xg']:.2f} xG created ({a['shots']} shots)",
             "pitch": _pitch_map(won[t], colour[t]),
             "by_third": a["by_third"], "starters": a["starters"][:6],
             "rows": _padded(best_rows(t), ("n", "minute", "player", "zone", "to_shot", "shots", "xg")),
