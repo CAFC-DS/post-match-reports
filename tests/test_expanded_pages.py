@@ -12,9 +12,9 @@ TEMPLATES = Path(__file__).resolve().parents[1] / "src" / "report" / "expanded" 
 def test_page_counts():
     # The recovered report was 16 / 15 pages; the contents page, the team-sheet
     # page (needs DVMS lineups) and the receptions / threat pages add three.
-    assert build_page_plan(True)["total"] == 24
-    assert build_page_plan(False)["total"] == 23
-    assert build_page_plan(True, has_team_sheet=False)["total"] == 24
+    assert build_page_plan(True)["total"] == 25
+    assert build_page_plan(False)["total"] == 24
+    assert build_page_plan(True, has_team_sheet=False)["total"] == 25
     assert "ov_sheet" not in build_page_plan(True, has_team_sheet=False)["pages"]
 
 
@@ -82,7 +82,13 @@ def _stub_context(tracked: bool, team_sheet: bool = True) -> dict:
         regain_ctx={t: {"n": 5, "counts": [1, 2, 2], "pcts": [20, 40, 40], "shots": 1, "shot_pct": 20, "losses": [3, 2, 1],
                         "losses_n": 6} for t in teams},
         second_ball_kpis={t: {k: 0 for k in ("won_n", "n", "baseline_avg", "baseline_delta", "baseline_n", "won_pct")} for t in teams},
-        transition_kpis={k: 0 for k in ("high_losses_n", "counterpress_n", "shot_n", "shot_pct")},
+        subject_colour="#d01012", opponent_colour="#857f72",
+        trans_defending={t: {"kpis": [(1, "balls lost")], "pitch": "", "zone": "", "buckets": [{"label": "under 3 s", "n": 1, "pct": 100}],
+                             "counterpress": [{"name": "Skipp", "n": 2}], "xg_max": .3,
+                             "rows": [{"n": 1, "minute": "36'", "player": "Okonkwo", "zone": "GK", "back": "7 s", "shots": 1, "xg": .3}]} for t in teams},
+        trans_attacking={t: {"kpis": [(1, "balls won")], "pitch": "", "zone": "", "by_third": [{"name": "Middle third", "wins": 2, "shots": 1, "xg": .2}],
+                             "starters": [{"name": "Bell", "n": 1}], "xg_max": .2,
+                             "rows": [{"n": 1, "minute": "40'", "player": "Bell", "zone": "CM", "to_shot": "5.0 s", "shots": 1, "xg": .2}]} for t in teams},
         stat_rows_expanded=[],
         baseline_matches=46,
         summary={"home": teams[1], "score": {teams[0]: 1, teams[1]: 3}, "half_time": {teams[0]: 1, teams[1]: 2},

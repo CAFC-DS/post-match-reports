@@ -10,7 +10,6 @@ y from -335 to 335, the team in possession attacking upwards.
 """
 
 import numpy as np
-from matplotlib import patches
 from matplotlib.axes import Axes
 
 __all__ = ["PACKING_ZONES", "WIDTH", "HEIGHT"]

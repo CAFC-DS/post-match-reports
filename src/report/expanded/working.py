@@ -13,7 +13,7 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from src.report import impect_cafcdb_source, metrics, palette
 from src.report.render_combined import build_context as build_shared_context
-from src.report.expanded import _fonts
+from src.report.expanded import _fonts, transition as transition_mod
 from src.report.expanded import season_baseline as sb
 from src.report.expanded import inpossession as inpossession_mod
 from src.report.expanded import bookmarks, layout_check
@@ -21,7 +21,7 @@ from src.report.expanded.browser import chrome_version, resolve_chrome
 from src.report.expanded.charts import (
     _PERFORMANCE_WHEEL_METRICS, _chance_source_stacked, _duel_bars_by_type, _entries_kpis, _flow_timeline,
     _infer_pass_receivers, _local_passing_network_map, _match_timeline, _performance_wheel, _player_threat_ranking,
-    _second_ball_kpis, _starters_only_network, _threat_density_maps, _transition_response_map, _xg_race,
+    _second_ball_kpis, _starters_only_network, _threat_density_maps, _xg_race,
 )
 from src.report.expanded import gamestate as gamestate_mod
 from src.report.expanded import summary as summary_mod
@@ -159,7 +159,7 @@ def build_context(impect_match_id: int, dvms_match_id: str | None = None) -> dic
     threat_density_img,threat_density_kpis=_threat_density_maps(events,teams)
     entries_kpis=_entries_kpis(events,subject)
     ooc_ctx=outofpossession_mod.outofpossession_context(events,duel_involvement,pressure_events,subject,opponent)
-    transition_img,transition_kpis=_transition_response_map(events,subject,opponent)
+    transition_ctx=transition_mod.transition_context(events,subject,opponent)
     tracked=bool(context["tracked_shapes"])
     overview_ctx: dict[str, Any]={}
     if dvms_match is not None:
@@ -211,7 +211,8 @@ def build_context(impect_match_id: int, dvms_match_id: str | None = None) -> dic
         **summary_ctx,
         "baseline_matches":len(baseline),
         "second_ball_kpis":second_balls,
-        "transition_img":transition_img,"transition_kpis":transition_kpis,
+        **transition_ctx,
+        "subject_colour":palette.CHARLTON_RED,"opponent_colour":palette.OPPONENT_GREY,
         "duel_aerial_bars_img":_duel_bars_by_type(
             duel_involvement,subject,opponent,"AERIAL",events=events),
         "duel_ground_bars_img":_duel_bars_by_type(

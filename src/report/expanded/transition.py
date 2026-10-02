@@ -148,3 +148,94 @@ def attacking(frame: pd.DataFrame, top: int = 8) -> dict[str, Any]:
                      for i, r in by_third.sort_index().iterrows()],
         "starters": [{"name": str(k), "n": int(v)} for k, v in starters.items()],
     }
+
+
+# --------------------------------------------------------------------------- #
+# Report context: maps, tables and tiles for the two transition pages
+# --------------------------------------------------------------------------- #
+ROWS = 5            # rows in the table under each pitch
+
+
+def _pitch_map(frame: pd.DataFrame, colour: str, top: int = ROWS) -> str:
+    """Every event in grey; those followed by a shot as bubbles sized by xG; the costliest numbered."""
+    from src.report import pitch
+
+    pitch_obj, fig, ax = pitch._horizontal_pitch((5.6, 3.6))
+    f = frame.dropna(subset=["x", "y"])
+    if len(f):
+        x, y = pitch._to_pitch(f["x"], f["y"])
+        pitch_obj.scatter(x, y, ax=ax, s=16, color="#cfc7b4", zorder=2)
+    hot = f[f["xg"] > 0].sort_values("xg", ascending=False)
+    if len(hot):
+        x, y = pitch._to_pitch(hot["x"], hot["y"])
+        pitch_obj.scatter(x, y, ax=ax, s=70 + hot["xg"].to_numpy() * 800, color=colour, alpha=.8,
+                          edgecolors="white", zorder=3)
+        for k, (px, py) in enumerate(zip(x.to_numpy()[:top], y.to_numpy()[:top]), 1):
+            ax.text(px, py, str(k), ha="center", va="center", fontsize=8, fontweight="bold", color="white", zorder=5)
+    return pitch._fig_to_uri(fig)
+
+
+def _zone_map(xg_by_zone: dict[str, float], counts: dict[str, int], word: str, colour: str, vmax: float) -> str:
+    from src.report.expanded import packing_zones
+
+    return packing_zones.zone_chart(xg_by_zone, colour, vmax, decimals=2, sub={z: f"{n} {word}" for z, n in counts.items()},
+                                    small=True)
+
+
+def _padded(rows: list[dict[str, Any]], keys: tuple[str, ...]) -> list[dict[str, Any]]:
+    """Always ``ROWS`` rows so both teams' tables line up."""
+    return (rows + [{k: "–" for k in keys}] * ROWS)[:ROWS]
+
+
+def transition_context(events: pd.DataFrame, subject: str, opponent: str) -> dict[str, Any]:
+    from src.report import palette
+
+
+    teams = (subject, opponent)
+    colour = {subject: palette.CHARLTON_RED, opponent: palette.OPPONENT_GREY}
+    opp = {subject: opponent, opponent: subject}
+    lost = {t: losses(events, t, opp[t]) for t in teams}
+    won = {t: regains(events, t, opp[t]) for t in teams}
+    punish = {t: punished(lost[t], ROWS) for t in teams}
+    attack = {t: attacking(won[t]) for t in teams}
+    speed = {t: regain_speed(lost[t]) for t in teams}
+    vmax_loss = max([max(p["xg_by_zone"].values(), default=0.0) for p in punish.values()] + [1e-9])
+    vmax_win = max([max(a["xg_by_zone"].values(), default=0.0) for a in attack.values()] + [1e-9])
+    from src.report.expanded.packing_zones import LABELS
+
+    zone_label = lambda z: LABELS.get(z, z) if z and z != "–" else "–"
+
+    def costly_rows(t: str) -> list[dict[str, Any]]:
+        top = lost[t][lost[t]["xg"] > 0].sort_values("xg", ascending=False).head(ROWS)
+        return [{"n": i, "minute": f"{int(r.minute)}'", "player": r.player, "zone": zone_label(r.zone),
+                 "back": "not won back" if pd.isna(r.regain_s) else f"{r.regain_s:.0f} s", "shots": int(r.shots),
+                 "xg": round(float(r.xg), 2)} for i, r in enumerate(top.itertuples(), 1)]
+
+    def best_rows(t: str) -> list[dict[str, Any]]:
+        top = won[t][won[t]["xg"] > 0].sort_values("xg", ascending=False).head(ROWS)
+        return [{"n": i, "minute": f"{int(r.minute)}'", "player": r.player, "zone": zone_label(r.zone),
+                 "to_shot": "–" if pd.isna(r.first_shot_s) else f"{r.first_shot_s:.1f} s", "shots": int(r.shots),
+                 "xg": round(float(r.xg), 2)} for i, r in enumerate(top.itertuples(), 1)]
+
+    defending, attacking_ctx = {}, {}
+    for t in teams:
+        sp, p, a = speed[t], punish[t], attack[t]
+        defending[t] = {
+            "kpis": [(p["n"], "balls lost"), (f"{sp['counterpress_pct']}%", "won back within 5 s"),
+                     (f"{sp['median_s']} s" if sp["median_s"] is not None else "–", "median time to regain"),
+                     (f"{p['xg']:.2f}", f"xG conceded ({p['shots']} shots)")],
+            "pitch": _pitch_map(lost[t], colour[t]), "zone": _zone_map(p["xg_by_zone"], p["losses_by_zone"], "lost", colour[t], vmax_loss),
+            "buckets": sp["buckets"], "counterpress": counterpress_players(lost[t], 6),
+            "rows": _padded(costly_rows(t), ("n", "minute", "player", "zone", "back", "shots", "xg")),
+            "xg_max": max([r["xg"] for r in costly_rows(t)] + [1e-9]),
+        }
+        attacking_ctx[t] = {
+            "kpis": [(a["n"], "balls won"), (f"{a['shot_pct']}%", "won ball → shot ≤ 15 s"),
+                     (f"{a['median_first_shot_s']} s" if a["median_first_shot_s"] is not None else "–", "median time to the shot"),
+                     (f"{a['xg']:.2f}", f"xG created ({a['shots']} shots)")],
+            "pitch": _pitch_map(won[t], colour[t]), "zone": _zone_map(a["xg_by_zone"], a["wins_by_zone"], "won", colour[t], vmax_win),
+            "by_third": a["by_third"], "starters": a["starters"][:6],
+            "rows": _padded(best_rows(t), ("n", "minute", "player", "zone", "to_shot", "shots", "xg")),
+            "xg_max": max([r["xg"] for r in best_rows(t)] + [1e-9]),
+        }
+    return {"trans_defending": defending, "trans_attacking": attacking_ctx}

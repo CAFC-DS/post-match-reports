@@ -45,7 +45,8 @@ def _plan(tracked_shapes: bool, has_team_sheet: bool, has_players: bool) -> list
         ("oop_duels", "out_of_possession", False),
         ("oop_regains", "out_of_possession", False),
         ("div_trans", "transition", True),
-        ("trans_response", "transition", False),
+        ("trans_defending", "transition", False),
+        ("trans_attacking", "transition", False),
     ]
     if has_players:
         plan += [("div_players", "players", True)]
@@ -119,8 +120,9 @@ def section_info(subject: str, tracked_shapes: bool, has_team_sheet: bool,
         },
         "transition": {
             "num": 4, "title": "Transition",
-            "blurb": f"Whether {subject} controlled the immediate response after losing the ball.",
-            "items": ["High attacking-half losses", "Counter-press regains", "Losses leading to shots"],
+            "blurb": "What both teams did in the seconds after losing and after winning the ball.",
+            "items": ["Defending: where losses were punished, time to regain, counter-press",
+                      "Attacking: where attacks started, regains that became shots"],
         },
     }
     if has_players:
@@ -157,7 +159,7 @@ PAGE_TITLES: dict[str, str] = {
     "ip_threat_zones": "Threat creation & player threat", "ip_entries": "Final-third & box entries",
     "ip_shots": "Shot maps, placement & chance sources", "oop_pressure": "Pressing & duels",
     "oop_duels": "Player duel performance", "oop_regains": "Ball regains & second balls",
-    "trans_response": "Transition response",
+    "trans_defending": "Defending transition", "trans_attacking": "Attacking transition",
 }
 
 
