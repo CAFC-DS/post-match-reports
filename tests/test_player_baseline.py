@@ -159,3 +159,24 @@ def test_physical_by_shirt_joins_tracking_to_the_team_sheet_and_filters_by_team(
     out = pb.physical_by_shirt(Match(), "Charlton Athletic")
     assert list(out) == [8] and out[8]["distance"] == 10.5 and out[8]["top_speed"] == 31.2
     assert pb.physical_by_shirt(type("M", (), {"physical": pd.DataFrame(), "f7": Match.f7})(), "Charlton Athletic") == {}
+
+
+def test_merge_pages_keeps_listed_rows_and_blanks_metrics_of_other_roles():
+    def page(key, names, rows):
+        return {"key": key, "label": key, "columns": [{"role": key, "name": n} for n in names], "physical": [],
+                "rows": [{"key": k, "label": k, "desc": "", "cells": [{"text": f"{k}-{n}", "own": "", "league": "",
+                                                                     "v_own": "", "v_league": "", "v_both": ""}
+                                                                    for n in names]} for k in rows]}
+
+    merged = {p["key"]: p for p in pb.merge_pages([
+        page("gk", ["Keeper"], ["saves", "passes", "clearances"]),
+        page("cb", ["A", "B"], ["passes", "interceptions"]), page("fb", [], []), page("mf", ["M"], ["passes"]),
+        page("w", [], []), page("cf", [], [])])}
+    assert list(merged) == ["defenders", "midfielders", "attackers"]
+    d = merged["defenders"]
+    assert [c["name"] for c in d["columns"]] == ["Keeper", "A", "B"]
+    labels = [r["label"] for r in d["rows"]]
+    assert labels == [k for k in pb.PAGE_ROWS["defenders"] if k in {"saves", "passes", "clearances", "interceptions"}]
+    saves = next(r for r in d["rows"] if r["key"] == "saves")["cells"]
+    assert saves[0]["text"] == "saves-Keeper" and [c["text"] for c in saves[1:]] == ["–", "–"]    # outfielders: no value
+    assert merged["attackers"]["columns"] == [] and merged["midfielders"]["columns"][0]["name"] == "M"

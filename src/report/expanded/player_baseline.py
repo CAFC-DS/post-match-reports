@@ -405,14 +405,15 @@ def _both(season: str, league: str) -> str:
 
 
 # The report shows three pages: the six position groups are merged into defenders (with the goalkeeper),
-# midfielders and attackers. Rows are the union of the member groups' metrics in the order of
-# ``PAGE_ROWS`` (or of the first appearance); a player simply has no value for a metric of another role.
+# midfielders and attackers. Rows are exactly ``PAGE_ROWS`` when listed, otherwise the union of the
+# member groups' metrics in order of first appearance; a player simply has no value for a metric of another role.
 PAGE_GROUPS = {"defenders": ("GK", "CB", "FB"), "midfielders": ("MF",), "attackers": ("W", "CF")}
 PAGE_LABELS = {"defenders": "Goalkeepers & Defenders", "midfielders": "Midfielders", "attackers": "Wingers & Forwards"}
 PAGE_ROWS = {
-    "defenders": ("saves", "catches", "long_passes", "touches", "passes", "pass_pct", "passes_third", "passes_box",
-                  "bypassed", "xt", "crosses_done", "dribbles", "interceptions", "clearances", "blocks", "duels",
-                  "duel_pct", "aerials", "wins", "presses", "fouls", "losses"),
+    "defenders": ("saves", "catches", "long_passes", "touches", "passes", "pass_pct", "passes_third", "bypassed", "xt",
+                  "interceptions", "clearances", "blocks", "duels", "aerials", "wins", "presses", "fouls", "losses"),
+    "attackers": ("touches", "goals", "shots", "sot", "xg", "xa", "key_passes", "sca", "xt", "dribbles", "passes_box",
+                  "receptions_btl", "bypassed", "presses", "forced", "aerials", "offsides", "losses"),
 }
 _BLANK_CELL = {"text": "", "own": "", "league": "", "v_own": "", "v_league": "", "v_both": ""}
 
@@ -424,9 +425,10 @@ def merge_pages(group_pages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     for key, members in PAGE_GROUPS.items():
         parts = [by_key[m.lower()] for m in members if m.lower() in by_key and by_key[m.lower()]["columns"]]
         columns = [c for part in parts for c in part["columns"]]
-        order: list[str] = list(PAGE_ROWS.get(key, ()))
-        for part in parts:
-            order += [r["key"] for r in part["rows"] if r["key"] not in order]
+        order: list[str] = list(PAGE_ROWS.get(key, ()))      # a listed page shows exactly these rows
+        if not order:
+            for part in parts:
+                order += [r["key"] for r in part["rows"] if r["key"] not in order]
         rows = []
         for metric in order:
             template = next((r for part in parts for r in part["rows"] if r["key"] == metric), None)
