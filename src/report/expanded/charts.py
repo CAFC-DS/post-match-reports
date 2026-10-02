@@ -492,6 +492,7 @@ def _duel_bars_by_type(duels: pd.DataFrame, charlton: str, opponent: str, duel_t
                 )
         return agg.loc[agg["involvement"] > 0].sort_values("involvement", ascending=False).head(5)
 
+    team_label = lambda t: str(t).split()[0]
     c, o = top5(charlton), top5(opponent)
     # Fixed 15-either-side scale, matching the reference's own axis exactly
     # (recovery/reference/verified_original page 13) rather than a
@@ -499,8 +500,7 @@ def _duel_bars_by_type(duels: pd.DataFrame, charlton: str, opponent: str, duel_t
     x_max = 15.0
 
     fig, axes = plt.subplots(1, 2, figsize=(18.5, 5.7), facecolor=palette.PAPER)
-    fig.subplots_adjust(left=0.08, right=0.93, top=0.82, bottom=0.1, wspace=0.42)
-    fig.text(0.5, 0.96, "LOST  ←            →  WON", ha="center", va="top", fontsize=12, color=palette.MUTED)
+    fig.subplots_adjust(left=0.08, right=0.93, top=0.80, bottom=0.1, wspace=0.42)
     for ax, team, frame in zip(axes, (charlton, opponent), (c, o)):
         ax.set_facecolor(palette.PAPER)
         y = np.arange(len(frame))[::-1] * 1.3
@@ -509,6 +509,10 @@ def _duel_bars_by_type(duels: pd.DataFrame, charlton: str, opponent: str, duel_t
                     alpha=0.95, zorder=2, height=0.9)
             ax.barh(y, frame["won_not_controlled"], left=frame["won_controlled"],
                     color=palette.SUCCESS_GREEN, alpha=0.35, zorder=2, height=0.9)
+            ax.barh(y, frame["won_unknown"], left=frame["won_controlled"] + frame["won_not_controlled"],
+                    color=palette.MUTED, alpha=0.3, zorder=2, height=0.9)
+            ax.barh(y, -frame["lost_unknown"], left=-(frame["lost_not_controlled"] + frame["lost_controlled"]),
+                    color=palette.MUTED, alpha=0.3, zorder=2, height=0.9)
             ax.barh(y, -frame["lost_not_controlled"], color=palette.FAIL_REDGREY,
                     alpha=0.95, zorder=2, height=0.9)
             ax.barh(y, -frame["lost_controlled"], left=-frame["lost_not_controlled"],
@@ -521,6 +525,10 @@ def _duel_bars_by_type(duels: pd.DataFrame, charlton: str, opponent: str, duel_t
                     (-row.lost_not_controlled / 2, row.lost_not_controlled, "white"),
                     (-(row.lost_not_controlled + row.lost_controlled / 2),
                      row.lost_controlled, palette.INK),
+                    (row.won_controlled + row.won_not_controlled + row.won_unknown / 2,
+                     row.won_unknown, palette.INK),
+                    (-(row.lost_not_controlled + row.lost_controlled + row.lost_unknown / 2),
+                     row.lost_unknown, palette.INK),
                 )
                 for x, value, color in segments:
                     if value:
@@ -547,10 +555,10 @@ def _duel_bars_by_type(duels: pd.DataFrame, charlton: str, opponent: str, duel_t
         title = f"{team}\nDuels won: {n_won}/{n_all} ({n_won / n_all * 100 if n_all else 0:.0f}%)"
         if has_control:
             team_rows = d.loc[d["squadName"] == team]
-            resolved = team_rows.loc[team_rows["control_resolved"]]
-            controlled = int((resolved["team_controlled"] == True).sum())  # noqa: E712
-            rate = controlled / len(resolved) * 100 if len(resolved) else 0.0
-            title += f" · post-duel control: {controlled}/{len(resolved)} ({rate:.0f}%)"
+            kept = int(team_rows["team_controlled"].eq(True).fillna(False).sum())  # noqa: E712
+            conceded = int(team_rows["team_controlled"].eq(False).fillna(False).sum())  # noqa: E712
+            title += (f"\nBall afterwards: {team_label(team)} {kept} · opponent {conceded} · "
+                      f"unclear {len(team_rows) - kept - conceded}")
         ax.set_title(title, fontsize=13, fontweight="bold", pad=10,
                      color=palette.CHARLTON_RED if team == charlton else palette.OPPONENT_GREY)
         ax.spines[:].set_visible(False)
@@ -562,8 +570,9 @@ def _duel_bars_by_type(duels: pd.DataFrame, charlton: str, opponent: str, duel_t
             Patch(color=palette.SUCCESS_GREEN, alpha=0.35, label="Won, control lost"),
             Patch(color=palette.FAIL_REDGREY, alpha=0.35, label="Lost, control recovered"),
             Patch(color=palette.FAIL_REDGREY, alpha=0.95, label="Lost, control conceded"),
+            Patch(color=palette.MUTED, alpha=0.3, label="Unclear (nothing followed within 5s)"),
         ]
-        columns = 4
+        columns = 5
     else:
         handles = [Patch(color=palette.SUCCESS_GREEN, label="Won"), Patch(color=palette.FAIL_REDGREY, label="Lost")]
         columns = 2

@@ -216,16 +216,22 @@ def build_context(impect_match_id: int, dvms_match_id: str | None = None) -> dic
             duel_involvement,subject,opponent,"AERIAL",events=events),
         "duel_ground_bars_img":_duel_bars_by_type(
             duel_involvement,subject,opponent,"GROUND",events=events),
-        "big_chances":{
-            team:[{"minute":str(r.gameTime).split(':')[0]+"'","player":str(r.playerName).split()[-1],"xg":float(r.SHOT_XG),
-                   "xgot":(float(r.POSTSHOT_XG) if str(r.category) in ("Goal","On target") else None),
-                   "result":("OFF TARGET" if str(r.category) == "Other" else str(r.category).upper())}
-                  for r in metrics.shot_events(events).loc[lambda x:x.squadName==team].nlargest(6,"SHOT_XG").itertuples()]
-            for team in teams
-        },
+        "big_chances":{team:_big_chances(metrics.shot_events(events),team) for team in teams},
         "font_faces_css": _fonts.embedded_css(),
     })
     return context
+
+
+def _big_chances(shots: pd.DataFrame, team: str, limit: int = 6) -> list[dict[str, Any]]:
+    """Every goal the team scored, then the largest remaining chances, in match order."""
+    own=shots.loc[shots.squadName==team]
+    goals=own.loc[own.category.astype(str)=="Goal"]
+    rest=own.drop(goals.index).nlargest(max(limit-len(goals),0),"SHOT_XG")
+    chosen=pd.concat([goals,rest]).sort_values("gameTimeInSec") if "gameTimeInSec" in own else pd.concat([goals,rest])
+    return [{"minute":str(r.gameTime).split(':')[0]+"'","player":str(r.playerName).split()[-1],"xg":float(r.SHOT_XG),
+             "xgot":(float(r.POSTSHOT_XG) if str(r.category) in ("Goal","On target") else None),
+             "result":("OFF TARGET" if str(r.category) == "Other" else str(r.category).upper())}
+            for r in chosen.itertuples()]
 
 
 def render_report(impect_match_id: int, dvms_match_id: str | None, output_path: Path,

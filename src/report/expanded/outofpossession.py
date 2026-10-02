@@ -183,6 +183,26 @@ def regain_summary(events: pd.DataFrame, team: str, top: int = 8) -> dict[str, A
             "frame": won}
 
 
+def _third_lines(ax: Any) -> None:
+    """Dashed boundaries between the thirds, labelled in the margin (own goal at the bottom)."""
+    for y in (105 / 3, 2 * 105 / 3):
+        ax.axhline(y, color=palette.INK, linestyle=(0, (4, 3)), linewidth=.9, alpha=.55, zorder=2)
+    for i, name in enumerate(("DEFENSIVE", "MIDDLE", "ATTACKING")):
+        ax.text(1.5, 105 / 6 + i * 105 / 3, name, fontsize=6, color=palette.MUTED, alpha=.8, rotation=90,
+                ha="left", va="center", zorder=2)
+
+
+def _density(pitch_obj: Any, ax: Any, x: Any, y: Any, colour: str, vmax: float | None = None) -> float:
+    """Soft density of where something happened (same look as the duel maps); returns the peak."""
+    px, py = pitch._to_pitch(x, y)
+    stat = pitch_obj.bin_statistic(px, py, statistic="count", bins=(14, 20))
+    stat["statistic"] = gaussian_filter(stat["statistic"], 1.4)
+    peak = float(stat["statistic"].max()) if stat["statistic"].size else 0.0
+    ramp = LinearSegmentedColormap.from_list("dens", [to_rgba(palette.PAPER_2, 0), to_rgba(colour, .5)])
+    pitch_obj.heatmap(stat, ax=ax, cmap=ramp, edgecolors="none", zorder=1, vmin=0, vmax=vmax or peak or 1)
+    return peak
+
+
 def regain_map_chart(summary: dict[str, Any]) -> str:
     """Own goal at the bottom; the thirds are shaded and each regain is a dot in its third's
     colour, ringed where the team shot within 15s."""
@@ -199,6 +219,7 @@ def regain_map_chart(summary: dict[str, Any]) -> str:
         if led.any():
             pitch_obj.scatter(x[led], y[led], ax=ax, s=110, facecolors="none", edgecolors=palette.INK, linewidth=1.5,
                               zorder=4)
+    _third_lines(ax)
     return pitch._fig_to_uri(fig)
 
 
@@ -212,9 +233,14 @@ def second_ball_contests(events: pd.DataFrame, team: str) -> pd.DataFrame:
     return contests
 
 
-def second_ball_map_chart(contests: pd.DataFrame) -> str:
-    """Won (dot) and lost (cross) second-ball contests, own goal at the bottom."""
+def second_ball_map_chart(contests: pd.DataFrame, colour: str = palette.CHARLTON_RED, vmax: float | None = None) -> str:
+    """Won (dot) and lost (cross) second-ball contests over a density of where they happened,
+    own goal at the bottom."""
     pitch_obj, fig, ax = pitch._vertical_pitch((3.5, 5.2))
+    has_xy = {"startAdjCoordinatesX", "startAdjCoordinatesY"} <= set(contests.columns)
+    located = contests.dropna(subset=["startAdjCoordinatesX", "startAdjCoordinatesY"]) if has_xy else contests.iloc[0:0]
+    if len(located):
+        _density(pitch_obj, ax, located["startAdjCoordinatesX"], located["startAdjCoordinatesY"], colour, vmax)
     for won, marker, face in ((False, "X", palette.FAIL_REDGREY), (True, "o", palette.SUCCESS_GREEN)):
         part = contests[contests["won"] == won]
         if part.empty:
@@ -222,6 +248,7 @@ def second_ball_map_chart(contests: pd.DataFrame) -> str:
         x, y = pitch._to_pitch(part["startAdjCoordinatesX"], part["startAdjCoordinatesY"])
         pitch_obj.scatter(x, y, ax=ax, s=34, color=face, marker=marker, edgecolors=palette.PAPER_2, linewidth=.7,
                           alpha=.92, zorder=3)
+    _third_lines(ax)
     return pitch._fig_to_uri(fig)
 
 
@@ -265,11 +292,12 @@ def outofpossession_context(events: pd.DataFrame, duels: pd.DataFrame, pressure:
 
     # one colour scale for both teams' pressure maps: peak of the smoothed counts over either team
     peak = max(pressure_heatmap(pressure, t, 0.0)[1] for t in teams)
+    sb = {t: second_ball_contests(events, t) for t in teams}
     summaries = {t: pressing_summary(pressure, events, t) for t in teams}
     regain = {t: regain_summary(events, t) for t in teams}
     return {
         "regain_img": {t: regain_map_chart(regain[t]) for t in teams},
-        "second_ball_img": {t: second_ball_map_chart(second_ball_contests(events, t)) for t in teams},
+        "second_ball_img": {t: second_ball_map_chart(sb[t], colour[t]) for t in teams},
         "regain_players_img": {t: regain_players_chart(regain[t]) for t in teams},
         "regain_ctx": {t: {k: v for k, v in regain[t].items() if k not in ("frame", "players")} for t in teams},
         "duel_totals": {t: duel_totals(oriented, t) for t in teams},
