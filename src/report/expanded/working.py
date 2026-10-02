@@ -171,7 +171,7 @@ def build_context(impect_match_id: int, dvms_match_id: str | None = None) -> dic
     first_sub=min([e["minute"] for _,_,evs in overview_ctx.get("timeline_by_team",[]) for e in evs if e["kind"]=="sub"],
                   default=None)
     gamestate_ctx=gamestate_mod.gamestate_context(events,pressure_events,subject,opponent,first_sub)
-    flow_timeline_img=_flow_timeline(events,dvms_match,subject,opponent,figsize=(3.35,1.9),font=5.6)
+    flow_timeline_img=_flow_timeline(events,dvms_match,subject,opponent,figsize=(5.4,1.3),font=6.6)
     timeline_img=_match_timeline(events,overview_ctx.get("timeline_by_team"),subject,opponent)
     players_ctx: dict[str, Any]={}
     try:
@@ -199,7 +199,7 @@ def build_context(impect_match_id: int, dvms_match_id: str | None = None) -> dic
         "network":networks,"network_scale_threat":network_scale_threat,
         "stat_rows_expanded":stat_rows_expanded,
         "performance_img":_performance_wheel(charlton_match_values,baseline),
-        "xg_race_img":_xg_race(events,teams,figsize=(3.35,1.9),font=5.6),
+        "xg_race_img":_xg_race(events,teams,figsize=(5.4,1.3),font=6.6),
         "threat_density_img":threat_density_img,"threat_density_kpis":threat_density_kpis,
         "flow_timeline_img":flow_timeline_img,"timeline_img":timeline_img,
         "entries_kpis":entries_kpis,

@@ -175,13 +175,6 @@ def _pitch_map(frame: pd.DataFrame, colour: str, top: int = ROWS) -> str:
     return pitch._fig_to_uri(fig)
 
 
-def _zone_map(xg_by_zone: dict[str, float], counts: dict[str, int], word: str, colour: str, vmax: float) -> str:
-    from src.report.expanded import packing_zones
-
-    return packing_zones.zone_chart(xg_by_zone, colour, vmax, decimals=2, sub={z: f"{n} {word}" for z, n in counts.items()},
-                                    small=True)
-
-
 def _padded(rows: list[dict[str, Any]], keys: tuple[str, ...]) -> list[dict[str, Any]]:
     """Always ``ROWS`` rows so both teams' tables line up."""
     return (rows + [{k: "–" for k in keys}] * ROWS)[:ROWS]
@@ -199,8 +192,6 @@ def transition_context(events: pd.DataFrame, subject: str, opponent: str) -> dic
     punish = {t: punished(lost[t], ROWS) for t in teams}
     attack = {t: attacking(won[t]) for t in teams}
     speed = {t: regain_speed(lost[t]) for t in teams}
-    vmax_loss = max([max(p["xg_by_zone"].values(), default=0.0) for p in punish.values()] + [1e-9])
-    vmax_win = max([max(a["xg_by_zone"].values(), default=0.0) for a in attack.values()] + [1e-9])
     from src.report.expanded.packing_zones import LABELS
 
     zone_label = lambda z: LABELS.get(z, z) if z and z != "–" else "–"
@@ -224,7 +215,7 @@ def transition_context(events: pd.DataFrame, subject: str, opponent: str) -> dic
             "kpis": [(p["n"], "balls lost"), (f"{sp['counterpress_pct']}%", "won back within 5 s"),
                      (f"{sp['median_s']} s" if sp["median_s"] is not None else "–", "median time to regain"),
                      (f"{p['xg']:.2f}", f"xG conceded ({p['shots']} shots)")],
-            "pitch": _pitch_map(lost[t], colour[t]), "zone": _zone_map(p["xg_by_zone"], p["losses_by_zone"], "lost", colour[t], vmax_loss),
+            "pitch": _pitch_map(lost[t], colour[t]),
             "buckets": sp["buckets"], "counterpress": counterpress_players(lost[t], 6),
             "rows": _padded(costly_rows(t), ("n", "minute", "player", "zone", "back", "shots", "xg")),
             "xg_max": max([r["xg"] for r in costly_rows(t)] + [1e-9]),
@@ -233,7 +224,7 @@ def transition_context(events: pd.DataFrame, subject: str, opponent: str) -> dic
             "kpis": [(a["n"], "balls won"), (f"{a['shot_pct']}%", "won ball → shot ≤ 15 s"),
                      (f"{a['median_first_shot_s']} s" if a["median_first_shot_s"] is not None else "–", "median time to the shot"),
                      (f"{a['xg']:.2f}", f"xG created ({a['shots']} shots)")],
-            "pitch": _pitch_map(won[t], colour[t]), "zone": _zone_map(a["xg_by_zone"], a["wins_by_zone"], "won", colour[t], vmax_win),
+            "pitch": _pitch_map(won[t], colour[t]),
             "by_third": a["by_third"], "starters": a["starters"][:6],
             "rows": _padded(best_rows(t), ("n", "minute", "player", "zone", "to_shot", "shots", "xg")),
             "xg_max": max([r["xg"] for r in best_rows(t)] + [1e-9]),

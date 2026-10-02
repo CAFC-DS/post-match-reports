@@ -83,10 +83,10 @@ def _stub_context(tracked: bool, team_sheet: bool = True) -> dict:
                         "losses_n": 6} for t in teams},
         second_ball_kpis={t: {k: 0 for k in ("won_n", "n", "baseline_avg", "baseline_delta", "baseline_n", "won_pct")} for t in teams},
         subject_colour="#d01012", opponent_colour="#857f72",
-        trans_defending={t: {"kpis": [(1, "balls lost")], "pitch": "", "zone": "", "buckets": [{"label": "under 3 s", "n": 1, "pct": 100}],
+        trans_defending={t: {"kpis": [(1, "balls lost")], "pitch": "", "buckets": [{"label": "under 3 s", "n": 1, "pct": 100}],
                              "counterpress": [{"name": "Skipp", "n": 2}], "xg_max": .3,
                              "rows": [{"n": 1, "minute": "36'", "player": "Okonkwo", "zone": "GK", "back": "7 s", "shots": 1, "xg": .3}]} for t in teams},
-        trans_attacking={t: {"kpis": [(1, "balls won")], "pitch": "", "zone": "", "by_third": [{"name": "Middle third", "wins": 2, "shots": 1, "xg": .2}],
+        trans_attacking={t: {"kpis": [(1, "balls won")], "pitch": "", "by_third": [{"name": "Middle third", "wins": 2, "shots": 1, "xg": .2}],
                              "starters": [{"name": "Bell", "n": 1}], "xg_max": .2,
                              "rows": [{"n": 1, "minute": "40'", "player": "Bell", "zone": "CM", "to_shot": "5.0 s", "shots": 1, "xg": .2}]} for t in teams},
         stat_rows_expanded=[],
@@ -148,7 +148,7 @@ def _stub_context(tracked: bool, team_sheet: bool = True) -> dict:
         row = {"shirt": 1, "name": "A Player", "role": "GK", "minutes": 96, "marks": [{"kind": "goal", "text": "7'"}]}
         ctx.update(
             team_sheets=[{"name": t, "is_charlton": i == 0, "formation": "4-2-3-1", "lineup_img": "",
-                          "starters": [row], "subs": [row], "unused": 2, "unused_names": ["Keeper", "Spare"],
+                          "starters": [row], "subs": [row], "unused": 2, "unused_rows": [{"shirt": 21, "name": "Spare Keeper", "role": "GK", "minutes": 0, "marks": []}], "unused_names": ["Keeper", "Spare"],
                           "score": 1 - i, "ht": 1, "goals": [{"who": "Scorer", "min": "28'", "assist": "Setter"}]}
                          for i, t in enumerate(teams)],
         )
@@ -211,7 +211,7 @@ def test_team_sheet_page_has_scorers_in_each_card():
     html = env.get_template("expanded.html.j2").render(**_stub_context(True))
     assert "half-time 1 – 1" in html
     assert "<b>28'</b> Scorer" in html and "assist Setter" in html
-    assert "Unused substitutes: Keeper, Spare" in html
+    assert "Unused substitutes</td>" in html and "Spare Keeper" in html
 
 
 def test_entries_fall_back_to_completion_when_there_is_no_line_break_data():

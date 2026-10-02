@@ -434,17 +434,17 @@ def lineup_chart(slots: list[dict[str, Any]], is_charlton: bool, match_end: floa
 
     from src.report import palette
 
-    fig, ax = plt.subplots(figsize=(2.9, 5.5), facecolor=palette.PAPER)     # stretched downwards: taller than true scale
+    fig, ax = plt.subplots(figsize=(2.3, 3.5), facecolor=palette.PAPER)
     fig.subplots_adjust(0, 0, 1, 1)
     ax.set_facecolor(palette.PAPER_2)
-    _draw_vertical_pitch(ax, palette.HAIR, aspect="auto")
+    _draw_vertical_pitch(ax, palette.HAIR)
     colour = palette.CHARLTON_RED if is_charlton else palette.OPPONENT_GREY
     n_rows = slots[0]["rows"] if slots else 5
     for s in slots:
         player = s["player"]
         x = 6 + s["x"] * 56 if s["row"] else 34
         y = 9 + s["row"] * (84 / max(n_rows - 1, 1))
-        ax.scatter([x], [y], s=560, c=colour, edgecolors=palette.PAPER, linewidths=1.6, zorder=3)
+        ax.scatter([x], [y], s=430, c=colour, edgecolors=palette.PAPER, linewidths=1.6, zorder=3)
         ax.text(x, y, "" if player.shirt is None else str(player.shirt), ha="center", va="center",
                 fontsize=10.5, fontweight="bold", color="white", zorder=4)
         ax.text(x, y - 6.8, player.last_name.split()[-1], ha="center", va="top", fontsize=7.8,
@@ -529,11 +529,11 @@ def timeline_chart(timeline_by_team: list[tuple[str, bool, list[dict[str, Any]]]
 
     font, levels, x_max = 10.5, 4, X_AXIS_MAX
     base, label_gap, step = .5, .26, .45          # in marker units: lane offset, label offset, label level spacing
-    fig, ax = plt.subplots(figsize=(16.0, 2.6), facecolor=palette.PAPER)
+    fig, ax = plt.subplots(figsize=(16.0, 2.2), facecolor=palette.PAPER)
     fig.subplots_adjust(left=0.07, right=0.99, top=0.99, bottom=0.2)
     ax.set_facecolor(palette.PAPER)
     _style_time_axis(ax, font)
-    ax.set_ylim(-2.5, 2.5)
+    ax.set_ylim(-2.35, 2.35)
     ax.set_yticks([])
     ax.spines["bottom"].set_visible(False)
     ax.axhline(0, color=palette.INK, linewidth=1.0, zorder=5)
@@ -651,6 +651,7 @@ def overview_context(f7, f24_events: pd.DataFrame, avg_positions, to_adj, impect
             "starters": _sheet_rows(sheet.starters, match_end),
             "subs": _sheet_rows(used, match_end),
             "unused": len(sheet.substitutes) - len(used),
+            "unused_rows": _sheet_rows([p for p in sheet.substitutes if not p.played], match_end),
             "unused_names": [p.last_name for p in sheet.substitutes if not p.played],
             "score": int(f7.home.score if sheet.side == "home" else f7.away.score),
             "goals": team_goals(f7, sheet.team_id),
