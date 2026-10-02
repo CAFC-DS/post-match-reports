@@ -12,9 +12,9 @@ TEMPLATES = Path(__file__).resolve().parents[1] / "src" / "report" / "expanded" 
 def test_page_counts():
     # The recovered report was 16 / 15 pages; the contents page, the team-sheet
     # page (needs DVMS lineups) and the receptions / threat pages add three.
-    assert build_page_plan(True)["total"] == 27
-    assert build_page_plan(False)["total"] == 26
-    assert build_page_plan(True, has_team_sheet=False)["total"] == 26
+    assert build_page_plan(True)["total"] == 24
+    assert build_page_plan(False)["total"] == 23
+    assert build_page_plan(True, has_team_sheet=False)["total"] == 24
     assert "ov_sheet" not in build_page_plan(True, has_team_sheet=False)["pages"]
 
 
@@ -24,8 +24,9 @@ def test_pages_are_numbered_contiguously_with_section_labels():
     assert numbers == list(range(1, plan["total"] + 1))
     assert plan["pages"]["contents"]["n"] == 1
     assert plan["pages"]["div_ip"]["label"] == "DIVIDER"
-    assert plan["pages"]["ov_sheet"]["label"] == "PAGE 2/11"
-    assert plan["pages"]["ov_players_gk"]["label"] == "PAGE 3/11" and plan["pages"]["ov_players_cf"]["label"] == "PAGE 8/11"
+    assert plan["pages"]["ov_sheet"]["label"] == "PAGE 2/4"
+    assert plan["pages"]["pl_defenders"]["label"] == "PAGE 1/3" and plan["pages"]["pl_attackers"]["label"] == "PAGE 3/3"
+    assert plan["order"][-4:] == ["div_players", "pl_defenders", "pl_midfielders", "pl_attackers"]
     assert plan["pages"]["net"]["label"] == "PAGE 1/7"
     assert plan["pages"]["ip_receptions"]["label"] == "PAGE 4/7"
     assert plan["pages"]["ip_threat_zones"]["label"] == "PAGE 5/7"
@@ -35,7 +36,7 @@ def test_pages_are_numbered_contiguously_with_section_labels():
     assert "oop_duel_maps" not in plan["pages"]
     assert plan["pages"]["oop_regains"]["label"] == "PAGE 3/3"
     assert "oop_second_balls" not in plan["pages"]
-    assert plan["sections"]["in_possession"] == {"first": 14, "last": 21}
+    assert plan["sections"]["in_possession"] == {"first": 7, "last": 14}
 
 
 def test_untracked_layout_merges_the_shape_pages():
@@ -120,16 +121,18 @@ def _stub_context(tracked: bool, team_sheet: bool = True) -> dict:
         contents=build_contents(plan, teams[0], tracked, team_sheet),
     )
     ctx.update(
-        player_pages=[{"key": g.lower(), "label": g_label,
-                       "columns": [{"name": "Moylan", "shirt": 8, "minutes": 82, "rated": True},
-                                   {"name": "Grant", "shirt": 9, "minutes": 10, "rated": False}] if g == "MF" else [],
-                       "rows": [{"label": "Passes completed", "desc": "Successful passes",
+        player_pages=[{"key": g, "label": g_label,
+                       "columns": [{"role": "Midfielders", "name": "Moylan", "shirt": 8, "minutes": 82, "rated": True},
+                                   {"role": "Midfielders", "name": "Grant", "shirt": 9, "minutes": 10,
+                                    "rated": False}] if g == "midfielders" else [],
+                       "physical": [],
+                       "rows": [{"key": "passes", "label": "Passes completed", "desc": "Successful passes",
                                  "cells": [{"text": "31", "own": "28.4", "league": "35.0", "v_own": "up", "v_league": "down",
                                             "v_both": "mixed"},
                                            {"text": "4", "own": "–", "league": "35.0", "v_own": "", "v_league": "",
                                             "v_both": ""}]}]}
-                      for g, g_label in (("GK", "Goalkeepers"), ("CB", "Centre-backs"), ("FB", "Full-backs"),
-                                         ("MF", "Midfielders"), ("W", "Wingers"), ("CF", "Forwards"))],
+                      for g, g_label in (("defenders", "Goalkeepers & Defenders"), ("midfielders", "Midfielders"),
+                                         ("attackers", "Wingers & Forwards"))],
         player_baseline_matches=6,
     )
     if team_sheet:
@@ -158,8 +161,8 @@ def test_template_footers_follow_the_registry():
 def test_contents_page_lists_every_section_with_its_page_span():
     plan = build_page_plan(True)
     rows = build_contents(plan, "Charlton Athletic", True, True)
-    assert [r["title"] for r in rows] == ["Overview", "In Possession", "Out of Possession", "Transition"]
-    assert rows[0]["pages"] == "pages 2\u201313"
+    assert [r["title"] for r in rows] == ["Overview", "In Possession", "Out of Possession", "Transition", "Player Performances"]
+    assert rows[0]["pages"] == "pages 2\u20136"
     assert "Where players received the ball" in rows[1]["items"]
     assert "Team sheet, lineups & timeline" in rows[0]["items"]
     assert "Team-by-team tracked phase shapes" in rows[1]["items"]
@@ -217,12 +220,12 @@ def test_player_performance_pages_are_one_per_position_with_players_as_columns()
     env = Environment(loader=FileSystemLoader(str(TEMPLATES)), autoescape=select_autoescape(["html"]),
                       trim_blocks=True, lstrip_blocks=True)
     html = env.get_template("expanded.html.j2").render(**_stub_context(True))
-    assert html.count("Player Performance ·") == 6
+    assert html.count("Player Performance ·") == 3
     assert "Player Performance · Midfielders" in html and "6 earlier matches" in html
     assert 'class="val tstart v-mixed"' in html and 'class="avg a-up"' in html and 'class="avg a-down"' in html
     assert ">Today<" in html and ">Season /90<" in html and ">League /90<" in html
     assert "<b>Passes completed</b><small>Successful passes</small>" in html
-    assert "No wingers played for Charlton Athletic" in html          # empty groups keep their page
+    assert "No goalkeepers & defenders played for Charlton Athletic" in html          # empty groups keep their page
     assert "Cardiff" not in html.split("Player Performance · Midfielders")[1].split("</section>")[0]
 
 
@@ -243,4 +246,4 @@ def test_match_summary_page_is_first_and_has_the_four_panels_without_the_old_hig
         assert text in html, text
     assert "Match Highlights" not in html
     plan = build_page_plan(True)
-    assert plan["order"].index("ov_summary") < plan["order"].index("ov_sheet") and plan["pages"]["ov_summary"]["label"] == "PAGE 1/11"
+    assert plan["order"].index("ov_summary") < plan["order"].index("ov_sheet") and plan["pages"]["ov_summary"]["label"] == "PAGE 1/4"

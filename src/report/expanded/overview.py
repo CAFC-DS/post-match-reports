@@ -414,11 +414,11 @@ def _png_uri(fig, *, tight: bool = True, dpi: int = 200) -> str:
     return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
 
 
-def _draw_vertical_pitch(ax, colour: str) -> None:
+def _draw_vertical_pitch(ax, colour: str, aspect: str = "equal") -> None:
     """A plain 68 x 105 pitch, attacking up, in the report's hairline style."""
     from matplotlib.patches import Circle
 
-    ax.set_xlim(-2, 70); ax.set_ylim(-2, 107); ax.set_aspect("equal"); ax.axis("off")
+    ax.set_xlim(-2, 70); ax.set_ylim(-2, 107); ax.set_aspect(aspect); ax.axis("off")
     line = dict(color=colour, lw=.9, solid_capstyle="round")
     ax.plot([0, 68, 68, 0, 0], [0, 0, 105, 105, 0], **line)
     ax.plot([0, 68], [52.5, 52.5], **line)
@@ -434,10 +434,10 @@ def lineup_chart(slots: list[dict[str, Any]], is_charlton: bool, match_end: floa
 
     from src.report import palette
 
-    fig, ax = plt.subplots(figsize=(2.9, 4.35), facecolor=palette.PAPER)
+    fig, ax = plt.subplots(figsize=(2.9, 5.5), facecolor=palette.PAPER)     # stretched downwards: taller than true scale
     fig.subplots_adjust(0, 0, 1, 1)
     ax.set_facecolor(palette.PAPER_2)
-    _draw_vertical_pitch(ax, palette.HAIR)
+    _draw_vertical_pitch(ax, palette.HAIR, aspect="auto")
     colour = palette.CHARLTON_RED if is_charlton else palette.OPPONENT_GREY
     n_rows = slots[0]["rows"] if slots else 5
     for s in slots:
@@ -483,7 +483,7 @@ def _style_time_axis(ax, font: float) -> None:
     ax.axvline(45, color=palette.HAIR, linewidth=1.0, linestyle=(0, (3, 3)), zorder=1)
 
 
-def flow_timeline_chart(x, y, *, y_label: str = "Territory (m)") -> str:
+def flow_timeline_chart(x, y, *, y_label: str = "Territory (m)", figsize=(16.0, 3.9), font: float = 10.5) -> str:
     """Match flow: the rolling territory wave (``y`` > 0 is the subject's
     attacking half, red; below zero is the opponent's, grey) on the 0-98 minute
     axis. The figure width and margins match the timeline and the xG race, so
@@ -494,12 +494,11 @@ def flow_timeline_chart(x, y, *, y_label: str = "Territory (m)") -> str:
 
     from src.report import palette
 
-    font = 10.5
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
     peak = max(float(np.abs(y).max()) if len(y) else 0.0, 5.0)
-    fig, ax = plt.subplots(figsize=(16.0, 3.9), facecolor=palette.PAPER)
-    fig.subplots_adjust(left=0.07, right=0.99, top=0.97, bottom=0.12)
+    fig, ax = plt.subplots(figsize=figsize, facecolor=palette.PAPER)
+    fig.subplots_adjust(left=0.07 if figsize[0] > 8 else 0.15, right=0.99, top=0.97, bottom=0.12 if figsize[1] > 2.5 else 0.17)
     ax.set_facecolor(palette.PAPER)
     ax.fill_between(x, y, 0, where=y >= 0, interpolate=True, color=palette.CHARLTON_RED, alpha=.9, linewidth=0, zorder=3)
     ax.fill_between(x, y, 0, where=y <= 0, interpolate=True, color=palette.OPPONENT_GREY, alpha=.85, linewidth=0, zorder=3)
@@ -528,13 +527,13 @@ def timeline_chart(timeline_by_team: list[tuple[str, bool, list[dict[str, Any]]]
 
     from src.report import palette
 
-    font, levels, x_max = 10.5, 3, X_AXIS_MAX
-    base, label_gap, step = .55, .3, .42          # in marker units: lane offset, label offset, label level spacing
-    fig, ax = plt.subplots(figsize=(16.0, 2.35), facecolor=palette.PAPER)
-    fig.subplots_adjust(left=0.07, right=0.99, top=0.99, bottom=0.24)
+    font, levels, x_max = 10.5, 4, X_AXIS_MAX
+    base, label_gap, step = .5, .26, .45          # in marker units: lane offset, label offset, label level spacing
+    fig, ax = plt.subplots(figsize=(16.0, 2.6), facecolor=palette.PAPER)
+    fig.subplots_adjust(left=0.07, right=0.99, top=0.99, bottom=0.2)
     ax.set_facecolor(palette.PAPER)
     _style_time_axis(ax, font)
-    ax.set_ylim(-2.35, 2.35)
+    ax.set_ylim(-2.5, 2.5)
     ax.set_yticks([])
     ax.spines["bottom"].set_visible(False)
     ax.axhline(0, color=palette.INK, linewidth=1.0, zorder=5)
@@ -562,7 +561,10 @@ def timeline_chart(timeline_by_team: list[tuple[str, bool, list[dict[str, Any]]]
             centre = min(max(m, half + .3), x_max - half - .3)       # keep the label inside the axes
             level = next((i for i in range(levels) if centre - half > right_edge[i] + .8), levels - 1)
             right_edge[level] = centre + half
-            ax.text(centre, sign * (base + label_gap + level * step), text, ha="center",
+            label_y = sign * (base + label_gap + level * step)
+            if level:                                                   # a thin stem ties a raised label to its marker
+                ax.plot([m, m], [sign * (base + .16), label_y - sign * .03], color=palette.HAIR, linewidth=.8, zorder=2)
+            ax.text(centre, label_y, text, ha="center",
                     va="bottom" if sign > 0 else "top", fontsize=font, zorder=7, path_effects=halo,
                     fontweight="bold" if kind == "goal" else "normal",
                     color=colour if kind == "goal" else palette.INK)

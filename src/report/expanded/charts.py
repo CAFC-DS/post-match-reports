@@ -636,15 +636,14 @@ def _performance_wheel(match_values: dict[str, float], baseline: pd.DataFrame) -
     return _uri(fig)
 
 
-def _xg_race(events: pd.DataFrame, teams: list[str]) -> str:
+def _xg_race(events: pd.DataFrame, teams: list[str], figsize=(16.0, 3.5), font: float = 10.5) -> str:
     """Cumulative non-penalty xG step chart. X-axis ticks match the Match
     Flow / Territory chart directly above it on the same page (0'/15'/30'/HT/
     60'/75'/90', chart_dvms.territory_chart's own convention), not
     matplotlib's default 0/20/40/60/80 -- the reference's two charts on this
     page share one axis convention."""
-    font=10.5                      # same type scale as the match-flow chart above it
-    fig,ax=plt.subplots(figsize=(16.0,3.5),facecolor=palette.PAPER)
-    fig.subplots_adjust(left=0.07,right=0.99,top=0.96,bottom=0.15)
+    fig,ax=plt.subplots(figsize=figsize,facecolor=palette.PAPER)    # same type scale as the match-flow chart
+    fig.subplots_adjust(left=0.07 if figsize[0]>8 else 0.15,right=0.99,top=0.96,bottom=0.15 if figsize[1]>2.5 else 0.17)
     ax.set_facecolor(palette.PAPER)
     cum_by_team = {}
     for team,color in zip(teams,[palette.CHARLTON_RED,palette.OPPONENT_GREY]):
@@ -655,6 +654,7 @@ def _xg_race(events: pd.DataFrame, teams: list[str]) -> str:
         x=[0]+s["minute"].tolist()+[overview_mod.X_AXIS_MAX]; y=[0]+s["cum"].tolist(); y=y+[y[-1]]
         ax.step(x,y,where="post",label=team,color=color,lw=2)
     goals = events.loc[events["action"] == "GOAL"].sort_values("gameTimeInSec")
+    last_minute, raised = -99.0, False
     for _, g in goals.iterrows():
         s = cum_by_team.get(str(g["squadName"]))
         if s is None or s.empty:
@@ -662,14 +662,16 @@ def _xg_race(events: pd.DataFrame, teams: list[str]) -> str:
         g_minute = metrics.minute_num(str(g["gameTime"]))
         prior = s.loc[s["minute"] <= g_minute]
         y_at = float(prior.iloc[-1]["cum"]) if not prior.empty else 0.0
-        ax.scatter([g_minute], [y_at], s=42, color=palette.INK, zorder=5,
+        ax.scatter([g_minute], [y_at], s=42 * font / 10.5, color=palette.INK, zorder=5,
                    edgecolors=palette.PAPER, linewidth=0.8)
-        ax.annotate(str(g["playerName"]).split()[-1], (g_minute, y_at), xytext=(0, 7), textcoords="offset points",
+        raised = (not raised) if g_minute - last_minute < 8 else False      # stagger labels of goals close together
+        last_minute = g_minute
+        ax.annotate(str(g["playerName"]).split()[-1], (g_minute, y_at), xytext=(0, 7 + (8 if raised else 0)), textcoords="offset points",
                     fontsize=font, fontweight="bold", color=palette.INK, ha="center", zorder=5)
     ax.set_xlim(0,overview_mod.X_AXIS_MAX); ax.spines[["top","right"]].set_visible(False); ax.grid(color=palette.HAIR_SOFT,lw=.6)
     ax.set_xticks(overview_mod.X_AXIS_TICKS)
     ax.set_xticklabels(overview_mod.X_AXIS_LABELS)
-    ax.set_ylabel("Cumulative\nnon-penalty xG", fontsize=font, color=palette.MUTED, linespacing=1.4)
+    ax.set_ylabel("Cumulative\nnon-penalty xG" if figsize[1] > 2.5 else "Cumulative xG", fontsize=font, color=palette.MUTED, linespacing=1.4)
     ax.tick_params(labelsize=font,colors=palette.MUTED); ax.legend(frameon=False,fontsize=font,loc="upper left")
     return _uri_fixed(fig)
 
@@ -746,7 +748,8 @@ def _starters_only_network(net: "metrics.PassingNetwork", events: pd.DataFrame, 
     return metrics.PassingNetwork(nodes, edges, net.first_sub_minute, net.total_passes)
 
 
-def _flow_timeline(events: pd.DataFrame, dvms_match, subject: str, opponent: str) -> str:
+def _flow_timeline(events: pd.DataFrame, dvms_match, subject: str, opponent: str,
+                   figsize=(16.0, 3.9), font: float = 10.5) -> str:
     """Territory flow (tracking) or Impect momentum (fallback), for the overview's match-flow panel."""
     wave=None
     if dvms_match is not None:
@@ -759,9 +762,11 @@ def _flow_timeline(events: pd.DataFrame, dvms_match, subject: str, opponent: str
             wave=None
     if wave is not None:
         return overview_mod.flow_timeline_chart(wave["minute"],wave["territory_m"],
-                                                y_label="Territory (m from halfway)")
+                                                y_label="Territory (m from halfway)" if figsize[1] > 2.5 else "Territory (m)",
+                                                figsize=figsize, font=font)
     momentum=metrics.momentum(events,subject,opponent)
-    return overview_mod.flow_timeline_chart(momentum["minute"],momentum["momentum"],y_label="Net threat (rolling)")
+    return overview_mod.flow_timeline_chart(momentum["minute"],momentum["momentum"],y_label="Net threat (rolling)",
+                                            figsize=figsize,font=font)
 
 
 def _match_timeline(events: pd.DataFrame, timeline_by_team, subject: str, opponent: str) -> str:

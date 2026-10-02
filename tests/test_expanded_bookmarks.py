@@ -9,7 +9,7 @@ def test_toc_has_a_section_per_divider_with_content_pages_beneath_it():
     toc = build_toc(plan, section_info("Charlton Athletic", True, True))
     assert toc[0] == [1, "Contents", 1]
     level1 = [t for t in toc if t[0] == 1]
-    assert [t[1] for t in level1] == ["Contents", "Overview", "In Possession", "Out of Possession", "Transition"]
+    assert [t[1] for t in level1] == ["Contents", "Overview", "In Possession", "Out of Possession", "Transition", "Player Performances"]
     assert len(toc) == plan["total"] and [t[2] for t in toc] == list(range(1, plan["total"] + 1))
     assert all(t[1] != key for t in toc for key in plan["order"] if key in PAGE_TITLES)     # titles, not keys
     assert [1, "In Possession", plan["pages"]["div_ip"]["n"]] in toc

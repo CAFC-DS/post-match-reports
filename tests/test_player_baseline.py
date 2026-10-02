@@ -103,9 +103,9 @@ def test_players_context_is_charlton_only_with_a_page_per_position():
                            dict(playerId=8, playerName="B Eight", squadName="Away", squadId=2)])
     ctx = pb.players_context(pd.concat([history, today], ignore_index=True), events, "Home", 3)
     pages = {p["key"]: p for p in ctx["player_pages"]}
-    assert list(pages) == ["gk", "cb", "fb", "mf", "w", "cf"] and ctx["player_baseline_matches"] == 2
-    assert pages["gk"]["columns"] == [] and pages["cf"]["rows"][0]["cells"] == []         # empty groups are kept
-    mf = pages["mf"]
+    assert list(pages) == ["defenders", "midfielders", "attackers"] and ctx["player_baseline_matches"] == 2
+    assert pages["defenders"]["columns"] == [] and pages["attackers"]["rows"] == []        # empty pages are kept
+    mf = pages["midfielders"]
     assert [(c["name"], c["rated"]) for c in mf["columns"]] == [("Seven", True), ("Nine", False)]   # no Away players
     labels = [r["label"] for r in mf["rows"]]
     assert labels[:3] == ["Touches", "Passes completed", "Pass accuracy"] and "Threat created (xT)" in labels

@@ -404,6 +404,55 @@ def _both(season: str, league: str) -> str:
     return "up" if total > 0 else ("down" if total < 0 else "level")
 
 
+# The report shows three pages: the six position groups are merged into defenders (with the goalkeeper),
+# midfielders and attackers. Rows are the union of the member groups' metrics in the order of
+# ``PAGE_ROWS`` (or of the first appearance); a player simply has no value for a metric of another role.
+PAGE_GROUPS = {"defenders": ("GK", "CB", "FB"), "midfielders": ("MF",), "attackers": ("W", "CF")}
+PAGE_LABELS = {"defenders": "Goalkeepers & Defenders", "midfielders": "Midfielders", "attackers": "Wingers & Forwards"}
+PAGE_ROWS = {
+    "defenders": ("saves", "catches", "long_passes", "touches", "passes", "pass_pct", "passes_third", "passes_box",
+                  "bypassed", "xt", "crosses_done", "dribbles", "interceptions", "clearances", "blocks", "duels",
+                  "duel_pct", "aerials", "wins", "presses", "fouls", "losses"),
+}
+_BLANK_CELL = {"text": "", "own": "", "league": "", "v_own": "", "v_league": "", "v_both": ""}
+
+
+def merge_pages(group_pages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Combine the per-group pages into ``PAGE_GROUPS``; empty pages are kept so the page count is fixed."""
+    by_key = {g["key"]: g for g in group_pages}
+    merged = []
+    for key, members in PAGE_GROUPS.items():
+        parts = [by_key[m.lower()] for m in members if m.lower() in by_key and by_key[m.lower()]["columns"]]
+        columns = [c for part in parts for c in part["columns"]]
+        order: list[str] = list(PAGE_ROWS.get(key, ()))
+        for part in parts:
+            order += [r["key"] for r in part["rows"] if r["key"] not in order]
+        rows = []
+        for metric in order:
+            template = next((r for part in parts for r in part["rows"] if r["key"] == metric), None)
+            if template is None:
+                continue
+            cells = []
+            for part in parts:
+                own = next((r for r in part["rows"] if r["key"] == metric), None)
+                cells += own["cells"] if own else [dict(_BLANK_CELL, text="–") for _ in part["columns"]]
+            rows.append({"key": metric, "label": template["label"], "desc": template["desc"], "cells": cells})
+        phys: list[dict[str, Any]] = []
+        for part in parts:
+            for r in part["physical"]:
+                match = next((x for x in phys if x["label"] == r["label"]), None)
+                if match is None:
+                    match = {"label": r["label"], "unit": r["unit"], "cells": []}
+                    phys.append(match)
+        for r in phys:
+            r["cells"] = []
+            for part in parts:
+                own = next((x for x in part["physical"] if x["label"] == r["label"]), None)
+                r["cells"] += own["cells"] if own else ["–"] * len(part["columns"])
+        merged.append({"key": key, "label": PAGE_LABELS[key], "columns": columns, "rows": rows, "physical": phys})
+    return merged
+
+
 def players_context(all_rows: pd.DataFrame, events: pd.DataFrame, team: str, match_id: int,
                     physical: dict[int, dict[str, float]] | None = None) -> dict[str, Any]:
     """Template context: one page per position group for ``team``'s players. Players are the columns
@@ -427,7 +476,8 @@ def players_context(all_rows: pd.DataFrame, events: pd.DataFrame, team: str, mat
         columns = []
         for p in players:
             shirt = today.loc[today["playerId"] == p["playerId"], "shirt"]
-            columns.append({"name": str(names.get(p["playerId"], "")).split()[-1] or str(p["playerId"]),
+            columns.append({"role": GROUP_LABELS[group],
+                            "name": str(names.get(p["playerId"], "")).split()[-1] or str(p["playerId"]),
                             "shirt": int(shirt.iloc[0]) if len(shirt) and pd.notna(shirt.iloc[0]) else "",
                             "minutes": p["minutes"], "rated": p["minutes"] >= MIN_MATCH_MINUTES,
                             "played_as": p["played_as"]})
@@ -439,7 +489,7 @@ def players_context(all_rows: pd.DataFrame, events: pd.DataFrame, team: str, mat
                 cells.append({"text": _format(c["today"], key, raw=True), "own": _format(c["season_value"], key),
                               "league": _format(c["league_value"], key), "v_own": c["season"], "v_league": c["league"],
                               "v_both": _both(c["season"], c["league"])})
-            rows.append({"label": METRICS[key].label, "desc": METRICS[key].desc, "cells": cells})
+            rows.append({"key": key, "label": METRICS[key].label, "desc": METRICS[key].desc, "cells": cells})
         phys_rows = []
         if physical:
             for key, label, unit, dec in PHYSICAL_ROWS:
@@ -449,4 +499,4 @@ def players_context(all_rows: pd.DataFrame, events: pd.DataFrame, team: str, mat
                                       "cells": ["–" if v is None else f"{v:.{dec}f}" for v in vals]})
         pages.append({"key": group.lower(), "label": GROUP_LABELS[group], "columns": columns, "rows": rows,
                       "physical": phys_rows})
-    return {"player_pages": pages, "player_baseline_matches": int(history["matchId"].nunique())}
+    return {"player_pages": merge_pages(pages), "player_baseline_matches": int(history["matchId"].nunique())}

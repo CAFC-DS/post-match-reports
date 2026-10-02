@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-SECTIONS = ("overview", "in_possession", "out_of_possession", "transition")
+SECTIONS = ("overview", "in_possession", "out_of_possession", "transition", "players")
 
 
 def _plan(tracked_shapes: bool, has_team_sheet: bool, has_players: bool) -> list[tuple[str, str, bool]]:
@@ -21,11 +21,12 @@ def _plan(tracked_shapes: bool, has_team_sheet: bool, has_players: bool) -> list
     plan.append(("ov_summary", "overview", False))
     if has_team_sheet:
         plan.append(("ov_sheet", "overview", False))
-    if has_players:
-        plan += [(f"ov_players_{g.lower()}", "overview", False) for g in ("GK", "CB", "FB", "MF", "W", "CF")]
     plan += [
         ("ov_stats", "overview", False),
-        ("ov_flow", "overview", False),
+    ]
+    if not has_team_sheet:        # without the team sheet the timeline gets a page of its own
+        plan.append(("ov_flow", "overview", False))
+    plan += [
         ("ov_phases", "overview", False),
         ("div_ip", "in_possession", True),
         ("net", "in_possession", False),
@@ -46,6 +47,9 @@ def _plan(tracked_shapes: bool, has_team_sheet: bool, has_players: bool) -> list
         ("div_trans", "transition", True),
         ("trans_response", "transition", False),
     ]
+    if has_players:
+        plan += [("div_players", "players", True)]
+        plan += [(f"pl_{g}", "players", False) for g in ("defenders", "midfielders", "attackers")]
     return plan
 
 
@@ -84,14 +88,13 @@ def section_info(subject: str, tracked_shapes: bool, has_team_sheet: bool,
                  has_players: bool = True) -> dict[str, dict[str, Any]]:
     """Title, blurb and sub-items per section: the single source for both the
     divider pages and the contents page."""
-    overview = ["Match stats & team performance", "Match flow, timeline & xG race",
-                "Game state & 15-minute phases"]
-    if has_players:
-        overview.insert(0, "Player performance by position vs season & league averages")
+    overview = ["Match stats, team performance, match flow & xG race", "Game state & 15-minute phases"]
     if has_team_sheet:
         overview.insert(0, "Team sheet, lineups & timeline")
+    else:
+        overview.insert(0, "Match timeline")
     overview.insert(0, "Match summary")
-    return {
+    info = {
         "overview": {
             "num": 1, "title": "Overview",
             "blurb": f"Who played, match stats, {subject}'s season-relative performance profile, "
@@ -120,6 +123,13 @@ def section_info(subject: str, tracked_shapes: bool, has_team_sheet: bool,
             "items": ["High attacking-half losses", "Counter-press regains", "Losses leading to shots"],
         },
     }
+    if has_players:
+        info["players"] = {
+            "num": 5, "title": "Player Performances",
+            "blurb": f"Every {subject} player against his own season average and the league average for his position.",
+            "items": ["Goalkeepers & defenders", "Midfielders", "Wingers & forwards"],
+        }
+    return info
 
 
 def build_contents(plan: dict[str, Any], subject: str, tracked_shapes: bool,
@@ -128,6 +138,8 @@ def build_contents(plan: dict[str, Any], subject: str, tracked_shapes: bool,
     info = section_info(subject, tracked_shapes, has_team_sheet, has_players)
     rows = []
     for section in SECTIONS:
+        if section not in plan["sections"]:
+            continue
         span = plan["sections"][section]
         pages = f"page {span['first']}" if span["first"] == span["last"] else f"pages {span['first']}\u2013{span['last']}"
         rows.append({**info[section], "section": section, "pages": pages, "first": span["first"]})
@@ -137,10 +149,8 @@ def build_contents(plan: dict[str, Any], subject: str, tracked_shapes: bool,
 # Titles for the PDF outline (bookmarks). Dividers carry their section title instead.
 PAGE_TITLES: dict[str, str] = {
     "ov_summary": "Match summary", "ov_sheet": "Team sheet, lineups & timeline",
-    "ov_players_gk": "Player performance · Goalkeepers", "ov_players_cb": "Player performance · Centre-backs",
-    "ov_players_fb": "Player performance · Full-backs", "ov_players_mf": "Player performance · Midfielders",
-    "ov_players_w": "Player performance · Wingers", "ov_players_cf": "Player performance · Forwards",
-    "ov_stats": "Match stats & team performance", "ov_flow": "Match flow, timeline & xG race",
+    "pl_defenders": "Goalkeepers & defenders", "pl_midfielders": "Midfielders", "pl_attackers": "Wingers & forwards",
+    "ov_stats": "Match stats, performance, flow & xG race", "ov_flow": "Match timeline",
     "ov_phases": "Game state & phases",
     "net": "Passing networks & progression", "shapes": "Average positions", "shapes_0": "Phase shapes · first team",
     "shapes_1": "Phase shapes · second team", "ip_receptions": "Where players received the ball",
