@@ -114,7 +114,10 @@ def _stub_context(tracked: bool, team_sheet: bool = True) -> dict:
                    "other": [{"label": "First half", "minutes": 45.0, "small": True, "xg_for": .4, "xg_against": .1,
                               "shots_for": 3, "shots_against": 1, "possession": None, "pressures_per_min": 2.0,
                               "regains": 3}], "end": 96.0, "first_goal": (20.0, "Charlton Athletic", "C Campbell")},
-        gamestate_band_img="", gamestate_period_img="",
+        gamestate_band_img="",
+        gamestate_scales={"xg": .5, "pressures": 40, "shots": 5},
+        gamestate_data={"periods": [{"label": "0–15'", "state": "leading", "state_label": "Leading by 1", "goals": ["Campbell 7'"],
+                                     "xg": (.4, .1), "pressures": (30, 20), "possession": (45, 55), "shots": (3, 1)}]},
         flow_timeline_img="",
         timeline_img="",
         line_breaks_available=True,
@@ -233,8 +236,8 @@ def test_game_state_page_renders_the_slice_table():
     env = Environment(loader=FileSystemLoader(str(TEMPLATES)), autoescape=select_autoescape(["html"]),
                       trim_blocks=True, lstrip_blocks=True)
     html = env.get_template("expanded.html.j2").render(**_stub_context(True))
-    assert "Game State & Phases" in html and "By 15-minute period" in html
-    assert 'class="sw sw-leading"' in html and "First half*" in html and "<b>0.40</b> – 0.10" in html
+    assert "Game State & Phases" in html and "gsp gsp-leading" in html and "Campbell 7" in html
+    assert "First half*" in html and "Leading by 1" in html
 
 
 def test_match_summary_page_is_first_and_has_the_four_panels_without_the_old_highlights_card():

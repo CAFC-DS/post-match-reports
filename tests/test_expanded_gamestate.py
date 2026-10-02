@@ -70,5 +70,18 @@ def test_slices_measure_both_teams_and_flag_small_samples():
 def test_charts_and_context_render():
     pressure = pd.DataFrame([dict(eventId=1, squadName=AWAY)])
     ctx = gs.gamestate_context(_events(), pressure, AWAY, HOME, 60.0)
-    assert ctx["gamestate_band_img"].startswith("data:image/png") and ctx["gamestate_period_img"].startswith("data:image/png")
+    assert ctx["gamestate_band_img"].startswith("data:image/png")
+    assert len(ctx["gamestate_data"]["periods"]) == 6 and set(ctx["gamestate_scales"]) == {"xg", "pressures", "shots"}
     assert set(ctx["gamestate"]) == {"states", "other", "end", "first_goal"} and "periods" in ctx["gamestate_data"]
+
+
+
+def test_periods_carry_the_score_state_and_the_goals_of_their_block():
+    pressure = pd.DataFrame(columns=["eventId", "squadName"])
+    data = gs.game_state_tables(_events(), pressure, AWAY, HOME)
+    periods = {p["label"]: p for p in data["periods"]}
+    assert periods["0–15'"]["state_label"] == "Level" and periods["0–15'"]["goals"] == []
+    assert periods["15–30'"]["state_label"] == "Leading by 1" and periods["15–30'"]["goals"] == ["Campbell 20'"]
+    assert periods["45–60'"]["state_label"] == "Level" and periods["45–60'"]["goals"] == ["Moylan 50'"]
+    assert periods["75–90'"]["state_label"] == "Trailing by 1"      # the own goal at 70' counts for Cardiff
+    assert gs.state_text("trailing", 2) == "Trailing by 2" and gs.state_text("level", 0) == "Level"
