@@ -124,9 +124,9 @@ def game_state_tables(events: pd.DataFrame, pressure: pd.DataFrame, subject: str
     other = [slice_row("First half", ev, pr, subject, opponent, [(0.0, first_half_end)]),
              slice_row("Second half", ev, pr, subject, opponent, [(first_half_end, end)])]
     if first_sub_minute is not None and 0 < first_sub_minute < end:
-        other += [slice_row(f"Before 1st sub ({first_sub_minute:.0f}')", ev, pr, subject, opponent,
+        other += [slice_row(f"Before the first substitution ({first_sub_minute:.0f}')", ev, pr, subject, opponent,
                             [(0.0, first_sub_minute)]),
-                  slice_row("After 1st sub", ev, pr, subject, opponent, [(first_sub_minute, end)])]
+                  slice_row("After the first substitution", ev, pr, subject, opponent, [(first_sub_minute, end)])]
 
     periods = []
     for i, (a, b) in enumerate(PERIODS):
