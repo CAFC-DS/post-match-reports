@@ -219,7 +219,7 @@ def transition_context(events: pd.DataFrame, subject: str, opponent: str) -> dic
         sp, p, a = speed[t], punish[t], attack[t]
         defending[t] = {
             "summary": f"{p['n']} lost · {sp['counterpress_pct']}% won back within 5 s · {p['xg']:.2f} xG conceded ({p['shots']} shots)",
-            "pitch": _pitch_map(lost[t], colour[t], vertical=True), "buckets": sp["buckets"],
+            "pitch": _pitch_map(lost[t], colour[t]), "buckets": sp["buckets"],
             "median": f"{sp['median_s']} s" if sp["median_s"] is not None else "–",
             "counterpress": counterpress_players(lost[t], 4), "by_third": p["by_third"], "losers": losers(lost[t]),
             "rows": _padded(costly_rows(t), ("n", "minute", "player", "zone", "back", "shots", "xg")),
