@@ -180,3 +180,12 @@ def test_merge_pages_keeps_listed_rows_and_blanks_metrics_of_other_roles():
     saves = next(r for r in d["rows"] if r["key"] == "saves")["cells"]
     assert saves[0]["text"] == "saves-Keeper" and [c["text"] for c in saves[1:]] == ["–", "–"]    # outfielders: no value
     assert merged["attackers"]["columns"] == [] and merged["midfielders"]["columns"][0]["name"] == "M"
+
+
+def test_player_without_a_name_in_the_events_falls_back_to_the_id():
+    history = pd.DataFrame([_row(1, 7, "MF", 90)])
+    today = pd.DataFrame([_row(3, 7, "MF", 90), _row(3, 9, "MF", 20, squad=1)])
+    events = pd.DataFrame([dict(playerId=7, playerName="A Seven", squadName="Home", squadId=1)])   # no events for player 9
+    ctx = pb.players_context(pd.concat([history, today], ignore_index=True), events, "Home", 3)
+    names = [c["name"] for p in ctx["player_pages"] for c in p["columns"]]
+    assert "Seven" in names and "9" in names

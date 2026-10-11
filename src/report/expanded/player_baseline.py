@@ -479,7 +479,7 @@ def players_context(all_rows: pd.DataFrame, events: pd.DataFrame, team: str, mat
         for p in players:
             shirt = today.loc[today["playerId"] == p["playerId"], "shirt"]
             columns.append({"role": GROUP_LABELS[group],
-                            "name": str(names.get(p["playerId"], "")).split()[-1] or str(p["playerId"]),
+                            "name": (str(names.get(p["playerId"], "")).split() or [str(p["playerId"])])[-1],
                             "shirt": int(shirt.iloc[0]) if len(shirt) and pd.notna(shirt.iloc[0]) else "",
                             "minutes": p["minutes"], "rated": p["minutes"] >= MIN_MATCH_MINUTES,
                             "played_as": p["played_as"]})

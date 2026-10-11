@@ -113,7 +113,7 @@ order by e.EVENT_INDEX
 
 
 def _kpi_row(event_kpis_json: str | None, player_id) -> dict:
-    if not event_kpis_json:
+    if not isinstance(event_kpis_json, (str, bytes, bytearray)) or not event_kpis_json:   # NaN (pandas 3) or None
         return {}
     for entry in json.loads(event_kpis_json):
         if entry.get("playerId") == player_id:
