@@ -36,9 +36,7 @@ from src.db.snowflake_connection import SnowflakeConnector
 from set_piece_report.data import (  # noqa: E402
     MatchContext,
     _count_goals,
-    _load_league_events,
     _matchday_info,
-    _team_regular_season,
 )
 
 DEV_ROLE = "DEV_ROLE"
@@ -261,21 +259,33 @@ def load_match_events(match_id: int, env_path: str = ".env") -> pd.DataFrame:
     return df
 
 
+def _matchday_names(match_id: int, competition: str, env_path: str = ".env") -> pd.DataFrame:
+    """Every round name of this fixture's iteration, for the 'round x of y' line."""
+    connector = SnowflakeConnector(env_path)
+    with connector.connection() as conn:
+        cur = conn.cursor()
+        cur.execute(f"USE ROLE {DEV_ROLE}")
+        cur.execute(f"USE WAREHOUSE {DEV_WAREHOUSE}")
+        cur.execute("""select distinct m."MATCHDAY.NAME" from CAFC_DB.IMPECT_RAW.MATCHES m
+                       where m.ITERATIONID = (select ITERATIONID from CAFC_DB.IMPECT_RAW.MATCHES where ID = %(id)s)""",
+                    {"id": match_id})
+        names = [r[0] for r in cur.fetchall()]
+    return pd.DataFrame({"competitionName": competition, "matchDayName": names})
+
+
 def load_match_context(match_id: int, env_path: str = ".env") -> MatchContext:
     """``MatchContext`` for a match sourced from ``CAFC_DB.IMPECT_RAW`` rather
-    than the legacy Championship-25/26-only ``IMPECT_EVENTS_STAGING`` table.
-    Season baselines (``home_season_events``/``away_season_events``) still
-    come from that legacy table -- both this report tool's clubs are
-    Championship sides fully covered there, and a same-season-so-far baseline
-    from ``CAFC_DB`` would be near-empty this early in a season anyway."""
+    than the legacy ``IMPECT_EVENTS_STAGING`` table, which no longer exists.
+    Season baselines are empty: comparisons are suppressed for this source
+    (see ``show_comparisons`` below), so nothing reads them."""
     match = load_match_events(match_id, env_path)
 
     home = str(match["homeSquadName"].iloc[0])
     away = str(match["awaySquadName"].iloc[0])
     competition = str(match["competitionName"].iloc[0])
 
-    league = _load_league_events()
-    matchday, matchday_total = _matchday_info(league, competition, match["matchDayName"].iloc[0])
+    matchday, matchday_total = _matchday_info(_matchday_names(match_id, competition, env_path), competition,
+                                              match["matchDayName"].iloc[0])
 
     player_team = (
         match.dropna(subset=["playerName", "squadName"])
@@ -296,8 +306,8 @@ def load_match_context(match_id: int, env_path: str = ".env") -> MatchContext:
         home_goals=_count_goals(match, home),
         away_goals=_count_goals(match, away),
         match_events=match,
-        home_season_events=_team_regular_season(league, home),
-        away_season_events=_team_regular_season(league, away),
+        home_season_events=match.iloc[0:0],       # baselines are suppressed (show_comparisons=False) and the
+        away_season_events=match.iloc[0:0],       # legacy IMPECT_EVENTS_STAGING table they came from is gone
         player_team=player_team,
         # Always suppressed for cafcdb-sourced fixtures: the /90 and % change
         # figures here compare this season's match against last season's
