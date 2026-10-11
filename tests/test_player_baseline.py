@@ -189,3 +189,22 @@ def test_player_without_a_name_in_the_events_falls_back_to_the_id():
     ctx = pb.players_context(pd.concat([history, today], ignore_index=True), events, "Home", 3)
     names = [c["name"] for p in ctx["player_pages"] for c in p["columns"]]
     assert "Seven" in names and "9" in names
+
+
+def test_natural_group_counts_appearances_so_a_cameo_cannot_outvote_the_real_role():
+    rows = pd.DataFrame([dict(matchId=1, group="CF", minutes=18.0), dict(matchId=2, group="MF", minutes=26.0),
+                         dict(matchId=3, group="CF", minutes=16.0)])
+    assert pb.natural_group(rows) == "CF"                                       # minutes alone would say MF
+    assert pb.natural_group(rows.iloc[[1]], pd.DataFrame([dict(matchId=9, group="CF", minutes=5.0),
+                                                          dict(matchId=8, group="CF", minutes=5.0)])) == "CF"   # last season
+    tie = pd.DataFrame([dict(matchId=1, group="W", minutes=20.0), dict(matchId=2, group="CF", minutes=60.0)])
+    assert pb.natural_group(tie) == "CF" and pb.natural_group(tie.iloc[0:0]) is None
+
+
+def test_missing_names_come_from_the_lookup_and_never_show_an_id():
+    history = pd.DataFrame([_row(1, 7, "MF", 90)])
+    today = pd.DataFrame([_row(3, 7, "MF", 90), _row(3, 9, "MF", 20, squad=1)])
+    events = pd.DataFrame([dict(playerId=7, playerName="A Seven", squadName="Home", squadId=1)])
+    ctx = pb.players_context(pd.concat([history, today], ignore_index=True), events, "Home", 3,
+                             name_lookup=lambda ids: {9: "Charlie Kelman"})
+    assert "Kelman" in [c["name"] for p in ctx["player_pages"] for c in p["columns"]]

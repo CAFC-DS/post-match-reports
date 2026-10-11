@@ -176,9 +176,17 @@ def build_context(impect_match_id: int, dvms_match_id: str | None = None) -> dic
     players_ctx: dict[str, Any]={}
     try:
         kickoff=pd.Timestamp(events["dateTime"].iloc[0]).tz_convert("UTC").strftime("%Y-%m-%dT%H:%M:%SZ")
+        squad_id=int(events.loc[events["squadName"]==subject,"squadId"].dropna().iloc[0])
+        prior_rows=None
+        try:    # last season's appearances make a player's own position stable early in the season
+            prior_iteration=player_baseline.previous_iteration_id(squad_id,str(events["season"].iloc[0]))
+            if prior_iteration:
+                prior_rows=player_baseline.season_to_date(impect_match_id,prior_iteration,kickoff,squad_id=squad_id)
+        except Exception as error:
+            print(f"warning: last season's appearances unavailable ({type(error).__name__}: {error})")
         players_ctx=player_baseline.players_context(
             player_baseline.season_to_date(impect_match_id,int(events["iterationId"].iloc[0]),kickoff),
-            events,subject,impect_match_id,
+            events,subject,impect_match_id,prior_rows=prior_rows,
             physical=player_baseline.physical_by_shirt(dvms_match,subject) if dvms_match is not None else None)
     except Exception as error:   # the tables are an extra: say why they are missing rather than fail the report
         print(f"warning: player tables skipped ({type(error).__name__}: {error})")

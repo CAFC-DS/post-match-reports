@@ -290,13 +290,19 @@ def verdict(value: float | None, average: float | None, higher_is_better: bool) 
     return "up" if (rel > 0) == higher_is_better else "down"
 
 
-def natural_group(history_rows: pd.DataFrame) -> str | None:
-    """The position group a player has spent most minutes in over the earlier matches, None without history."""
-    rows = history_rows[history_rows["group"].notna()]
+def natural_group(history_rows: pd.DataFrame, prior_rows: pd.DataFrame | None = None) -> str | None:
+    """A player's own position group: the group of most of his appearances over the earlier matches of this
+    season and, when given, last season (one vote per match, so a short out-of-position cameo cannot outvote his
+    real role); ties go to the group with more minutes. None without any history."""
+    frames = [f for f in (history_rows, prior_rows) if f is not None and len(f)]
+    if not frames:
+        return None
+    rows = pd.concat(frames)
+    rows = rows[rows["group"].notna() & (rows["minutes"] > 0)]
     if rows.empty:
         return None
-    by_group = rows.groupby("group")["minutes"].sum()
-    return str(by_group.idxmax()) if float(by_group.max()) > 0 else None
+    stats = rows.groupby("group").agg(apps=("matchId", "nunique"), minutes=("minutes", "sum"))
+    return str(stats.sort_values(["apps", "minutes"], ascending=False).index[0])
 
 
 def physical_by_shirt(dvms_match: Any, team: str) -> dict[int, dict[str, float]]:
@@ -323,7 +329,8 @@ PHYSICAL_ROWS = (("distance", "Distance covered", "km", 1), ("hsr", "High-speed 
                  ("top_speed", "Top speed", "km/h", 1))
 
 
-def build_player_tables(history: pd.DataFrame, today: pd.DataFrame, squad_id: int) -> list[dict[str, Any]]:
+def build_player_tables(history: pd.DataFrame, today: pd.DataFrame, squad_id: int,
+                        prior: pd.DataFrame | None = None) -> list[dict[str, Any]]:
     """Groups of player rows for one squad in the reported match.
 
     ``history`` is every earlier match of the season; ``today`` the reported match rows. A player is
@@ -336,7 +343,7 @@ def build_player_tables(history: pd.DataFrame, today: pd.DataFrame, squad_id: in
         main = rows.sort_values("minutes", ascending=False).iloc[0]
         today_group = main["group"]
         mine_before = history[(history["playerId"] == pid)]
-        group = natural_group(mine_before) or today_group
+        group = natural_group(mine_before, None if prior is None else prior[prior["playerId"] == pid]) or today_group
         if group not in out:
             continue
         minutes = float(rows["minutes"].max())
@@ -360,11 +367,11 @@ def build_player_tables(history: pd.DataFrame, today: pd.DataFrame, squad_id: in
 
 
 def season_to_date(match_id: int, iteration_id: int, kickoff: str, env_path: str = ".env",
-                   refresh: bool = False) -> pd.DataFrame:
+                   refresh: bool = False, squad_id: int | None = None) -> pd.DataFrame:
     """Every player-match of the season up to and including ``match_id``, cached on disk.
 
     Matches are final once played, so only matches missing from the cache are queried."""
-    cache = CACHE_DIR / f"player_matches_{int(iteration_id)}_v4.parquet"
+    cache = CACHE_DIR / f"player_matches_{int(iteration_id)}{'' if squad_id is None else f'_sq{int(squad_id)}'}_v4.parquet"
     have = pd.read_parquet(cache) if cache.exists() and not refresh else pd.DataFrame()
     connector = SnowflakeConnector(env_path)
     with connector.connection() as conn:
@@ -373,8 +380,9 @@ def season_to_date(match_id: int, iteration_id: int, kickoff: str, env_path: str
         cur.execute(f"USE WAREHOUSE {DEV_WAREHOUSE}")
         cur.execute("""select distinct e.MATCH_ID from CAFC_DB.IMPECT_RAW.EVENTS e
                        join CAFC_DB.IMPECT_RAW.MATCHES m on m.ID = e.MATCH_ID
-                       where e.ITERATION_ID = %(it)s and m.SCHEDULEDDATE <= %(ko)s""",
-                    {"it": int(iteration_id), "ko": kickoff})
+                       where e.ITERATION_ID = %(it)s and m.SCHEDULEDDATE <= %(ko)s
+                         and (%(sq)s is null or m.HOMESQUADID = %(sq)s or m.AWAYSQUADID = %(sq)s)""",
+                    {"it": int(iteration_id), "ko": kickoff, "sq": None if squad_id is None else int(squad_id)})
         wanted = {int(r[0]) for r in cur.fetchall()} | {int(match_id)}
     missing = sorted(wanted - set(have["matchId"]) if len(have) else wanted)
     if missing:
@@ -383,6 +391,45 @@ def season_to_date(match_id: int, iteration_id: int, kickoff: str, env_path: str
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
         have.to_parquet(cache)
     return have[have["matchId"].isin(wanted)]
+
+
+def previous_iteration_id(squad_id: int, season: str, env_path: str = ".env") -> int | None:
+    """The iteration (e.g. last season's league) in which ``squad_id`` played most matches the season before ``season``."""
+    try:
+        first, second = (int(x) for x in season.split("/"))
+    except ValueError:
+        return None
+    prev = f"{first - 1:02d}/{second - 1:02d}"
+    connector = SnowflakeConnector(env_path)
+    with connector.connection() as conn:
+        cur = conn.cursor()
+        cur.execute(f"USE ROLE {DEV_ROLE}")
+        cur.execute(f"USE WAREHOUSE {DEV_WAREHOUSE}")
+        cur.execute("""select m.ITERATIONID, count(*) n from CAFC_DB.IMPECT_RAW.MATCHES m
+                       join CAFC_DB.IMPECT_RAW.ITERATIONS it on it.ID = m.ITERATIONID
+                       where it.SEASON = %(s)s and (m.HOMESQUADID = %(sq)s or m.AWAYSQUADID = %(sq)s)
+                       group by 1 order by 2 desc limit 1""", {"s": prev, "sq": int(squad_id)})
+        row = cur.fetchone()
+    return int(row[0]) if row else None
+
+
+def fetch_player_names(ids: list[int], env_path: str = ".env") -> dict[int, str]:
+    """Player names by Impect id (``PLAYERS`` lists a player once per iteration; the latest wins)."""
+    ids = sorted({int(i) for i in ids})
+    if not ids:
+        return {}
+    try:
+        connector = SnowflakeConnector(env_path)
+        with connector.connection() as conn:
+            cur = conn.cursor()
+            cur.execute(f"USE ROLE {DEV_ROLE}")
+            cur.execute(f"USE WAREHOUSE {DEV_WAREHOUSE}")
+            marks = ",".join(str(i) for i in ids)                    # ints only: safe to inline
+            cur.execute(f"""select ID, coalesce(COMMONNAME, FIRSTNAME || ' ' || LASTNAME) from CAFC_DB.IMPECT_RAW.PLAYERS
+                            where ID in ({marks}) qualify row_number() over (partition by ID order by ITERATION_ID desc) = 1""")
+            return {int(r[0]): str(r[1]) for r in cur.fetchall()}
+    except Exception:                                               # a name is cosmetic: never fail the report
+        return {}
 
 
 def _format(value: float | None, key: str, raw: bool = False) -> str:
@@ -456,7 +503,9 @@ def merge_pages(group_pages: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def players_context(all_rows: pd.DataFrame, events: pd.DataFrame, team: str, match_id: int,
-                    physical: dict[int, dict[str, float]] | None = None) -> dict[str, Any]:
+                    physical: dict[int, dict[str, float]] | None = None,
+                    prior_rows: pd.DataFrame | None = None,
+                    name_lookup: Any = None) -> dict[str, Any]:
     """Template context: one page per position group for ``team``'s players. Players are the columns
     (starters then subs by minutes), the group's metrics are the rows, and each player has three cells:
     what he did today (raw), his own per-90 average and the league per-90 average for the position.
@@ -469,7 +518,9 @@ def players_context(all_rows: pd.DataFrame, events: pd.DataFrame, team: str, mat
     squad = events.loc[events["squadName"] == team, "squadId"].dropna()
     if squad.empty:
         return {}
-    groups = {g["group"]: g["players"] for g in build_player_tables(history, today, int(squad.iloc[0]))}
+    groups = {g["group"]: g["players"] for g in build_player_tables(history, today, int(squad.iloc[0]), prior_rows)}
+    missing = [int(p["playerId"]) for g in groups.values() for p in g if p["playerId"] not in names.index or not str(names.get(p["playerId"], "")).strip()]
+    extra = (name_lookup or fetch_player_names)(missing) if missing else {}
 
     pages = []
     for group in GROUP_ORDER:
@@ -479,7 +530,7 @@ def players_context(all_rows: pd.DataFrame, events: pd.DataFrame, team: str, mat
         for p in players:
             shirt = today.loc[today["playerId"] == p["playerId"], "shirt"]
             columns.append({"role": GROUP_LABELS[group],
-                            "name": (str(names.get(p["playerId"], "")).split() or [str(p["playerId"])])[-1],
+                            "name": (str(names.get(p["playerId"], "")).split() or str(extra.get(int(p["playerId"]), "")).split() or [str(p["playerId"])])[-1],
                             "shirt": int(shirt.iloc[0]) if len(shirt) and pd.notna(shirt.iloc[0]) else "",
                             "minutes": p["minutes"], "rated": p["minutes"] >= MIN_MATCH_MINUTES,
                             "played_as": p["played_as"]})
