@@ -12,7 +12,7 @@ import pymupdf as fitz
 import numpy as np
 from pypdf import PdfReader
 
-_DATE_RE = re.compile(rb"/(CreationDate|ModDate) \(D:\d{14}[+-]\d{2}'\d{2}'\)")
+_DATE_RE = re.compile(rb"/(CreationDate|ModDate)\s*\(D:\d{14}[+-]\d{2}'\d{2}'\)")
 _SPACE_RE = re.compile(r"\s+")
 
 

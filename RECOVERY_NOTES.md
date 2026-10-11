@@ -404,3 +404,18 @@ regardless).
 `src/report/expanded/render.py` and `src/report/expanded/metrics/` (see the note above: they imported modules that
 never existed and could not be imported) were deleted with the user's sign-off. `tests/test_imports.py` now imports
 every module under `src/` and `post_match_reports/`, so a broken module fails CI instead of lingering.
+
+## Expanded-report golden fixture
+
+`tests/golden/expanded_analyst_report_Cardiff_City_v_Charlton_Athletic_19-09-2026.pdf` is the signed-off 25-page layout
+(Cardiff City 3-1 Charlton Athletic, Impect match 267920, DVMS 2647337). `tests/test_expanded_regression.py` checks its page
+count (from the page registry), orientation and key text, and that metadata-only differences compare exactly
+(`regression.compare_pdfs`). Regenerate it only after a deliberate, approved layout change:
+
+```
+python generate_report_expanded.py --impect-match-id 267920 --dvms-match-id 2647337 --output-dir /tmp/golden
+cp "/tmp/golden/Analyst Post Match Report - Cardiff City (A).pdf" tests/golden/expanded_analyst_report_Cardiff_City_v_Charlton_Athletic_19-09-2026.pdf
+```
+
+Then update the `D:` timestamp string in `test_metadata_only_changes_compare_exactly` to the new file's CreationDate. The board and
+set-piece goldens (West Ham, 22/08/2026) are unchanged.
