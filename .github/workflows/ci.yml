@@ -18,4 +18,5 @@ jobs:
           python-version: "3.10"
           cache: pip
       - run: pip install -r requirements.txt
+      - run: python -m compileall -q src post_match_reports
       - run: python -m pytest -q

@@ -28,6 +28,7 @@ tables, confirmed empirically. Same per-query role/warehouse switch pattern as
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pandas as pd
 
@@ -36,9 +37,7 @@ from src.db.snowflake_connection import SnowflakeConnector
 from set_piece_report.data import (  # noqa: E402
     MatchContext,
     _count_goals,
-    _load_league_events,
     _matchday_info,
-    _team_regular_season,
 )
 
 DEV_ROLE = "DEV_ROLE"
@@ -113,7 +112,7 @@ order by e.EVENT_INDEX
 
 
 def _kpi_row(event_kpis_json: str | None, player_id) -> dict:
-    if not event_kpis_json:
+    if not isinstance(event_kpis_json, (str, bytes, bytearray)) or not event_kpis_json:   # NaN (pandas 3) or None
         return {}
     for entry in json.loads(event_kpis_json):
         if entry.get("playerId") == player_id:
@@ -261,21 +260,84 @@ def load_match_events(match_id: int, env_path: str = ".env") -> pd.DataFrame:
     return df
 
 
+def _matchday_names(match_id: int, competition: str, env_path: str = ".env") -> pd.DataFrame:
+    """Every round name of this fixture's iteration, for the 'round x of y' line."""
+    connector = SnowflakeConnector(env_path)
+    with connector.connection() as conn:
+        cur = conn.cursor()
+        cur.execute(f"USE ROLE {DEV_ROLE}")
+        cur.execute(f"USE WAREHOUSE {DEV_WAREHOUSE}")
+        cur.execute("""select distinct m."MATCHDAY.NAME" from CAFC_DB.IMPECT_RAW.MATCHES m
+                       where m.ITERATIONID = (select ITERATIONID from CAFC_DB.IMPECT_RAW.MATCHES where ID = %(id)s)""",
+                    {"id": match_id})
+        names = [r[0] for r in cur.fetchall()]
+    return pd.DataFrame({"competitionName": competition, "matchDayName": names})
+
+
+MIN_BASELINE_MATCHES = 3        # earlier matches each club needs before per-90 comparisons are shown
+_CACHE = Path.home() / ".cache" / "charlton-post-match-analyst"
+
+
+def _earlier_matches(match_id: int, env_path: str = ".env") -> tuple[pd.DataFrame, int, int]:
+    """Earlier matches of the same iteration for either club of ``match_id``: ``matchId``, ``squadId`` pairs."""
+    connector = SnowflakeConnector(env_path)
+    with connector.connection() as conn:
+        cur = conn.cursor()
+        cur.execute(f"USE ROLE {DEV_ROLE}")
+        cur.execute(f"USE WAREHOUSE {DEV_WAREHOUSE}")
+        cur.execute("""
+            select p.ID, p.HOMESQUADID, p.AWAYSQUADID from CAFC_DB.IMPECT_RAW.MATCHES c
+            join CAFC_DB.IMPECT_RAW.MATCHES p on p.ITERATIONID = c.ITERATIONID and p.SCHEDULEDDATE < c.SCHEDULEDDATE
+            where c.ID = %(id)s
+              and (p.HOMESQUADID in (c.HOMESQUADID, c.AWAYSQUADID) or p.AWAYSQUADID in (c.HOMESQUADID, c.AWAYSQUADID))
+            order by p.SCHEDULEDDATE""", {"id": match_id})
+        rows = cur.fetchall()
+        cur.execute("select HOMESQUADID, AWAYSQUADID from CAFC_DB.IMPECT_RAW.MATCHES where ID = %(id)s", {"id": match_id})
+        home_id, away_id = cur.fetchone()
+    return pd.DataFrame([{"matchId": int(r[0]), "home": int(r[1]), "away": int(r[2])} for r in rows]), int(home_id), int(away_id)
+
+
+def _cached_match_events(match_id: int, env_path: str) -> pd.DataFrame | None:
+    """One earlier match's events (set-piece fields derived), cached: finished matches never change."""
+    path = _CACHE / f"setpiece_events_{int(match_id)}.parquet"
+    if path.exists():
+        return pd.read_parquet(path)
+    try:
+        frame = load_match_events(match_id, env_path)
+    except ValueError:                          # a match without events (not yet processed)
+        return None
+    _CACHE.mkdir(parents=True, exist_ok=True)
+    frame.to_parquet(path)
+    return frame
+
+
+def load_season_baselines(match_id: int, env_path: str = ".env") -> tuple[pd.DataFrame, pd.DataFrame, int, int]:
+    """Each club's events from its earlier matches this season (``home``, ``away``) and how many matches that is."""
+    earlier, home_id, away_id = _earlier_matches(match_id, env_path)
+
+    def side(squad_id: int) -> pd.DataFrame:
+        ids = earlier.loc[(earlier["home"] == squad_id) | (earlier["away"] == squad_id), "matchId"].tolist()
+        frames = [f for f in (_cached_match_events(i, env_path) for i in ids) if f is not None]
+        return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+
+    home, away = side(home_id), side(away_id)
+    return home, away, int(home["matchId"].nunique()) if len(home) else 0, int(away["matchId"].nunique()) if len(away) else 0
+
+
 def load_match_context(match_id: int, env_path: str = ".env") -> MatchContext:
     """``MatchContext`` for a match sourced from ``CAFC_DB.IMPECT_RAW`` rather
-    than the legacy Championship-25/26-only ``IMPECT_EVENTS_STAGING`` table.
-    Season baselines (``home_season_events``/``away_season_events``) still
-    come from that legacy table -- both this report tool's clubs are
-    Championship sides fully covered there, and a same-season-so-far baseline
-    from ``CAFC_DB`` would be near-empty this early in a season anyway."""
+    than the legacy ``IMPECT_EVENTS_STAGING`` table, which no longer exists.
+    Season baselines come from the clubs' earlier matches in the same iteration
+    (see ``load_season_baselines``)."""
     match = load_match_events(match_id, env_path)
 
     home = str(match["homeSquadName"].iloc[0])
     away = str(match["awaySquadName"].iloc[0])
     competition = str(match["competitionName"].iloc[0])
 
-    league = _load_league_events()
-    matchday, matchday_total = _matchday_info(league, competition, match["matchDayName"].iloc[0])
+    home_season, away_season, home_n, away_n = load_season_baselines(match_id, env_path)
+    matchday, matchday_total = _matchday_info(_matchday_names(match_id, competition, env_path), competition,
+                                              match["matchDayName"].iloc[0])
 
     player_team = (
         match.dropna(subset=["playerName", "squadName"])
@@ -296,14 +358,10 @@ def load_match_context(match_id: int, env_path: str = ".env") -> MatchContext:
         home_goals=_count_goals(match, home),
         away_goals=_count_goals(match, away),
         match_events=match,
-        home_season_events=_team_regular_season(league, home),
-        away_season_events=_team_regular_season(league, away),
+        home_season_events=home_season if len(home_season) else match.iloc[0:0],
+        away_season_events=away_season if len(away_season) else match.iloc[0:0],
         player_team=player_team,
-        # Always suppressed for cafcdb-sourced fixtures: the /90 and % change
-        # figures here compare this season's match against last season's
-        # full-year rate for a squad that has since moved players in and out,
-        # which reads as a meaningful trend line but isn't a like-for-like
-        # comparison -- keep the report to the raw match numbers instead
-        # until this season itself has enough history to baseline against.
-        show_comparisons=False,
+        # Per-90 / % comparisons use each club's own earlier matches this season, and only appear once both
+        # clubs have MIN_BASELINE_MATCHES of them; earlier in the season the columns show "-".
+        show_comparisons=min(home_n, away_n) >= MIN_BASELINE_MATCHES,
     )

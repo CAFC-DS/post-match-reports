@@ -1,6 +1,6 @@
 import pandas as pd
 
-from src.report.expanded.working import _post_duel_control
+from src.report.expanded.charts import _post_duel_control
 
 
 def _event(event_id, number, seconds, team, action_type, action, result=None, period=1):

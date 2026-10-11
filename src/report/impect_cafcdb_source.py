@@ -51,6 +51,9 @@ _KPI_FIELDS = [
     # taken out of the game by a pass or dribble, confirmed present on
     # PASS/DRIBBLE events in EVENT_KPIS.
     "BYPASSED_OPPONENTS", "BYPASSED_DEFENDERS",
+    # Opponents taken out of the game by the *receiver* on a RECEPTION event
+    # (2026-09, analyst report: "where players received the ball").
+    "BYPASSED_OPPONENTS_RECEIVING",
 ]
 
 _EVENTS_SQL = """
@@ -84,6 +87,8 @@ select
     e.PHASE as "phase",
     e.PLAYER_ID as "playerId",
     pn.NAME as "playerName",
+    e.PLAYER_POSITION as "playerPosition",
+    e.PLAYER_POSITION_SIDE as "playerPositionSide",
     e.ACTION_TYPE as "actionType",
     e.ACTION as "action",
     e.RESULT as "result",
@@ -97,6 +102,10 @@ select
     e.END_DETAIL:pitchPosition::string as "endPitchPosition",
     e.END_DETAIL:lane::string as "endLane",
     e.END_DETAIL:packingZone::string as "endPackingZone",
+    -- Where a shot ended up on the goal frame (metres; +y is the attacker left, z is height).
+    e.RAW_EVENT:shot.targetPoint.y::float as "targetY",
+    e.RAW_EVENT:shot.targetPoint.z::float as "targetZ",
+    e.RAW_EVENT:shot.woodwork::string as "woodwork",
     e.EVENT_KPIS as "eventKpis"
 from CAFC_DB.IMPECT_RAW.EVENTS e
 join CAFC_DB.IMPECT_RAW.MATCHES m on m.ID = e.MATCH_ID
@@ -157,7 +166,10 @@ def load_season_results(iteration_id: int, env_path: str = ".env") -> pd.DataFra
 
 
 def _kpi_row_for_player(event_kpis_json: str | None, player_id) -> dict:
-    if not event_kpis_json:
+    # A NULL EVENT_KPIS arrives as None from the cursor but as float NaN once
+    # pandas 3 has built the DataFrame (NaN is truthy), so test for "a
+    # non-empty string" rather than truthiness.
+    if not isinstance(event_kpis_json, str) or not event_kpis_json:
         return {}
     entries = json.loads(event_kpis_json)
     for entry in entries:

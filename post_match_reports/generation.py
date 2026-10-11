@@ -15,13 +15,16 @@ from pypdf import PdfReader
 from src.dvms.loaders.fixtures import resolve_fixture
 from src.dvms.preprocess import is_preprocessed, preprocess_fixture
 from src.report import impect_cafcdb_source, metrics, naming
+from src.report.expanded.pages import build_page_plan
 from src.report.expanded.working import render_report as render_expanded
 from src.report.render_combined import render_report as render_board
 
 
 ROOT = Path(__file__).resolve().parents[1]
 SET_PIECE_ROOT = ROOT / "reports" / "set_piece"
-EXPECTED_PAGES = {"expanded": 16, "board": 1, "set_piece": 1}
+# The bundle always has DVMS tracking (it preprocesses it above), so the
+# expanded report is the tracked layout; its length comes from the page registry.
+EXPECTED_PAGES = {"expanded": build_page_plan(True)["total"], "board": 1, "set_piece": 1}
 
 
 def _log_stage(label: str) -> None:

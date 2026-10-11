@@ -158,6 +158,14 @@
 
   /* Matchday-1: no season baseline to compare against, so per90/%chg columns
      collapse and the bar takes the full row width instead of showing dashes. */
+  /* With baselines shown the stat column carries two extra numbers per row: tighten it so a busy match
+     (throw-in and free-kick groups as well as corners) still fits on one page. */
+  .stats.dense .stat-head { padding-bottom: 0.6mm; }
+  .stats.dense .bar-row { padding: 0.3mm 0; }
+  .stats.dense .stat-section { margin: 0.9mm 0 0.4mm; padding: 0.7mm 3mm; }
+  .stats.dense .bar-label { font-size: 6pt; margin-bottom: 0.2mm; }
+  .stats.dense .bar-track { height: 3.6mm; }
+  .stats.dense .bar-row .per90 { font-size: 6.8pt; }
   .stats.compact .stat-head { display: none; }
   .stats.compact .bar-row { grid-template-columns: 1fr; padding: 0.6mm 0; }
   .stats.compact .pct, .stats.compact .per90 { display: none; }
@@ -400,7 +408,7 @@
     </section>
 
     <!-- CENTER STAT COLUMN -->
-    <section class="stats {{ 'compact' if stats_compact }}">
+    <section class="stats {{ 'compact' if stats_compact else 'dense' }}">
       <div class="stat-head">
         <div class="c">% chg</div><div class="c">/90</div><div class="c"></div><div class="c">/90</div><div class="c">% chg</div>
       </div>
