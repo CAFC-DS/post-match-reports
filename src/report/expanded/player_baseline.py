@@ -146,8 +146,8 @@ def minute_of(game_time_in_sec: float) -> float:
 def player_minutes(info: dict[str, Any], match_end: float) -> dict[int, float]:
     """Minutes per player id for one side: starters play to the end or until subbed off;
     substitutes from the minute they come on."""
-    starts = json.loads(info["starting"]) if isinstance(info["starting"], str) else []
-    subs = json.loads(info["subs"]) if isinstance(info["subs"], str) else []
+    starts = (json.loads(info["starting"]) or []) if isinstance(info["starting"], str) else []
+    subs = (json.loads(info["subs"]) or []) if isinstance(info["subs"], str) else []
     on = {int(s["playerId"]): 0.0 for s in starts}
     off: dict[int, float] = {}
     for s in sorted(subs, key=lambda s: s["gameTime"]["gameTimeInSec"]):
@@ -234,7 +234,7 @@ def load_player_matches(iteration_id: int, match_ids: list[int], env_path: str =
     for match_id, home, away, hs, as_, hsub, asub, hplayers, aplayers, kickoff in infos:
         end = max(ends.get(int(match_id), 90.0), 90.0)
         for squad, starting, subs, players in ((home, hs, hsub, hplayers), (away, as_, asub, aplayers)):
-            shirts = {int(p["id"]): p.get("shirtNumber") for p in json.loads(players)} if isinstance(players, str) else {}
+            shirts = {int(p["id"]): p.get("shirtNumber") for p in (json.loads(players) or [])} if isinstance(players, str) else {}
             for pid, minutes in player_minutes({"starting": starting, "subs": subs}, end).items():
                 rows.append({"matchId": int(match_id), "playerId": pid, "squadId": int(squad), "minutes": minutes,
                              "shirt": shirts.get(pid), "kickoff": str(kickoff)})
