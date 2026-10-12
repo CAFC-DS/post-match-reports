@@ -231,7 +231,29 @@ def _derive_set_piece_fields(df: pd.DataFrame) -> pd.DataFrame:
     return df.drop(columns=["_spMainEvent"])
 
 
-def load_match_events(match_id: int, env_path: str = ".env") -> pd.DataFrame:
+def exclude_penalty_phases(df: pd.DataFrame) -> pd.DataFrame:
+    """Remove every penalty from the set-piece analysis: the ``PENALTY_KICK`` shot, its goal event and, when the
+    penalty arrives inside a running set-piece phase (a foul in the box from a corner or throw-in), everything in
+    that phase from the penalty onwards (saves, rebounds, second balls). Earlier events of the phase stay."""
+    if df.empty or "action" not in df.columns:
+        return df
+    pens = df[df["action"].astype(str) == "PENALTY_KICK"]
+    if pens.empty:
+        return df
+    drop = set(pens.index)
+    for idx, pen in pens.iterrows():
+        seq = pen["sequenceIndex"]
+        same_match = df["matchId"] == pen["matchId"]
+        if pd.notna(pen.get("setPieceId")):
+            in_phase = same_match & (df["setPieceId"] == pen["setPieceId"]) & (df["sequenceIndex"] >= seq)
+            drop |= set(df.index[in_phase])
+        goal = same_match & (df["actionType"].astype(str) == "GOAL") & (df["squadName"] == pen["squadName"]) \
+            & (df["sequenceIndex"] > seq) & (df["sequenceIndex"] <= seq + 3)
+        drop |= set(df.index[goal])
+    return df.drop(index=sorted(drop)).reset_index(drop=True)
+
+
+def load_match_events(match_id: int, env_path: str = ".env", exclude_penalties: bool = True) -> pd.DataFrame:
     """Impect events for one match, sourced from CAFC_DB, flattened + with
     set-piece sub-phase fields derived to the exact column contract
     ``set_piece_report/metrics.py`` expects (the shape ``IMPECT_EVENTS_STAGING``
@@ -257,7 +279,7 @@ def load_match_events(match_id: int, env_path: str = ".env") -> pd.DataFrame:
 
     df = _derive_set_piece_fields(df)
     df["_dt"] = pd.to_datetime(df["dateTime"], utc=True, errors="coerce")
-    return df
+    return exclude_penalty_phases(df) if exclude_penalties else df
 
 
 def _matchday_names(match_id: int, competition: str, env_path: str = ".env") -> pd.DataFrame:
@@ -303,7 +325,7 @@ def _cached_match_events(match_id: int, env_path: str) -> pd.DataFrame | None:
     if path.exists():
         return pd.read_parquet(path)
     try:
-        frame = load_match_events(match_id, env_path)
+        frame = load_match_events(match_id, env_path, exclude_penalties=False)    # cache the raw feed
     except ValueError:                          # a match without events (not yet processed)
         return None
     _CACHE.mkdir(parents=True, exist_ok=True)
@@ -318,7 +340,7 @@ def load_season_baselines(match_id: int, env_path: str = ".env") -> tuple[pd.Dat
     def side(squad_id: int) -> pd.DataFrame:
         ids = earlier.loc[(earlier["home"] == squad_id) | (earlier["away"] == squad_id), "matchId"].tolist()
         frames = [f for f in (_cached_match_events(i, env_path) for i in ids) if f is not None]
-        return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+        return exclude_penalty_phases(pd.concat(frames, ignore_index=True)) if frames else pd.DataFrame()
 
     home, away = side(home_id), side(away_id)
     return home, away, int(home["matchId"].nunique()) if len(home) else 0, int(away["matchId"].nunique()) if len(away) else 0
@@ -329,7 +351,8 @@ def load_match_context(match_id: int, env_path: str = ".env") -> MatchContext:
     than the legacy ``IMPECT_EVENTS_STAGING`` table, which no longer exists.
     Season baselines come from the clubs' earlier matches in the same iteration
     (see ``load_season_baselines``)."""
-    match = load_match_events(match_id, env_path)
+    raw = load_match_events(match_id, env_path, exclude_penalties=False)
+    match = exclude_penalty_phases(raw)             # every stat ignores penalties; the scoreline below does not
 
     home = str(match["homeSquadName"].iloc[0])
     away = str(match["awaySquadName"].iloc[0])
@@ -355,8 +378,8 @@ def load_match_context(match_id: int, env_path: str = ".env") -> MatchContext:
         matchday_total=matchday_total,
         home_team=home,
         away_team=away,
-        home_goals=_count_goals(match, home),
-        away_goals=_count_goals(match, away),
+        home_goals=_count_goals(raw, home),
+        away_goals=_count_goals(raw, away),
         match_events=match,
         home_season_events=home_season if len(home_season) else match.iloc[0:0],
         away_season_events=away_season if len(away_season) else match.iloc[0:0],
