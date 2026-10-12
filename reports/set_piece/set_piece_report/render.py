@@ -123,8 +123,8 @@ def _bar_row(r, show_comparisons: bool, goal_row=None) -> dict[str, Any]:
         "away_value": r.fmt(r.away_value),
         "home_goals": home_goals,
         "away_goals": away_goals,
-        "home_per90": f"{r.home_per90:.2f}" if show_comparisons else "-",
-        "away_per90": f"{r.away_per90:.2f}" if show_comparisons else "-",
+        "home_per90": f"{r.home_per90:.{0 if 'Retention' in r.label else 2}f}" if show_comparisons else "-",
+        "away_per90": f"{r.away_per90:.{0 if 'Retention' in r.label else 2}f}" if show_comparisons else "-",
         "home_pct": _pct_text(r.home_pct) if show_comparisons else blank_pct,
         "away_pct": _pct_text(r.away_pct) if show_comparisons else blank_pct,
         "home_width": round(hw, 2),
@@ -145,7 +145,7 @@ def _stat_groups_context(report_data, show_comparisons: bool = True) -> list[dic
     for r in report_data.stat_rows:
         if r.section:
             current = {"section": r.section, "count_row": None, "shot_row": None,
-                       "goal_row": None, "xg_row": None}
+                       "goal_row": None, "xg_row": None, "retention_row": None}
             groups.append(current)
         label = r.label
         if label.startswith("Total ") or label.endswith("Taken"):
@@ -156,6 +156,8 @@ def _stat_groups_context(report_data, show_comparisons: bool = True) -> list[dic
             current["xg_row"] = r
         elif label.startswith("Shots"):
             current["shot_row"] = r
+        elif label.startswith("Throw-In Retention"):
+            current["retention_row"] = r
 
     context_groups = []
     for g in groups:
@@ -170,6 +172,8 @@ def _stat_groups_context(report_data, show_comparisons: bool = True) -> list[dic
                 rows.append(_bar_row(g["xg_row"], show_comparisons))
             if g["shot_row"]:
                 rows.append(_bar_row(g["shot_row"], show_comparisons))
+            if g["retention_row"]:
+                rows.append(_bar_row(g["retention_row"], show_comparisons))
         elif g["shot_row"]:
             if g["xg_row"]:
                 rows.append(_bar_row(g["xg_row"], show_comparisons))

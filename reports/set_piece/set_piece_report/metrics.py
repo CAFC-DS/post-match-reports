@@ -178,6 +178,7 @@ def _team_match_counts(events: pd.DataFrame, team: str) -> dict[str, float]:
         "throw_in_shots": float((atk & throw & shot).sum()),
         "throw_in_goals": float((atk & throw & goal).sum()),
         "throw_in_xg": float(xg[atk & throw & shot].sum()),
+        "throw_in_retained": float(throw_in_retention(events, team)[1]),
         "indirect_fks": float((atk & fk_deliv).sum()),
         "fk_shots": float((atk & fk_event & shot).sum()),
         "fk_goals": float((atk & fk_event & goal).sum()),
@@ -250,6 +251,14 @@ def build_stat_rows(ctx: MatchContext) -> list[StatRow]:
             section=section,
         )
 
+    def retention_row():
+        """Throw-in retention as a percentage; the baseline is the season's retained / taken, not an average of rates."""
+        def pct(counts):
+            return counts["throw_in_retained"] / counts["throw_ins"] * 100.0 if counts.get("throw_ins") else 0.0
+
+        return StatRow(label="Throw-In Retention (%)", home_value=pct(m_home), away_value=pct(m_away),
+                       home_per90=pct(s_home) if s_home else 0.0, away_per90=pct(s_away) if s_away else 0.0)
+
     return [
         row("Total Corners", "corners", section="CORNERS"),
         row("Shots Created From Corners", "corner_shots"),
@@ -266,6 +275,7 @@ def build_stat_rows(ctx: MatchContext) -> list[StatRow]:
         row("Shots Created From Throw-Ins", "throw_in_shots"),
         row("Goals From Throw-Ins", "throw_in_goals"),
         row("xG Created From Throw-Ins", "throw_in_xg", decimals=2),
+        retention_row(),
     ]
 
 
@@ -444,6 +454,35 @@ def fk_deliveries(ctx: MatchContext, team: str) -> pd.DataFrame:
     return fks
 
 
+def _retained_flags(ev_all: pd.DataFrame, positions, team: str) -> list[bool]:
+    """Per throw (row positions in the chronological frame): did ``team`` have the next event after it?"""
+    flags = []
+    for pos in positions:
+        nxt = ev_all.iloc[pos + 1 : pos + 3]
+        nxt = nxt[nxt["squadName"].astype(str) != "nan"]
+        flags.append(bool(len(nxt)) and str(nxt.iloc[0]["squadName"]) == team)
+    return flags
+
+
+def throw_in_retention(events: pd.DataFrame, team: str) -> tuple[int, int]:
+    """``(valid throws taken, throws retained)`` for ``team`` over one or several matches. Same definition as the
+    green/red rings on the throw-in map: retained = the team's own event comes next."""
+    taken = retained = 0
+    groups = events.groupby("matchId") if "matchId" in events.columns else [(None, events)]
+    for _, ev in groups:
+        ev_all = _chronological(ev)
+        mask = (ev_all["actionType"] == "THROW_IN") & (ev_all["attackingSquadName"] == team)
+        throws = ev_all[mask].copy()
+        if throws.empty:
+            continue
+        throws["retained"] = _retained_flags(ev_all, np.where(mask.to_numpy())[0], team)
+        throws = classify_throw_ins(throws)
+        valid = throws[throws["throw_group"] != ANOMALY_THROW]
+        taken += len(valid)
+        retained += int(valid["retained"].sum())
+    return taken, retained
+
+
 def throw_in_deliveries(ctx: MatchContext, team: str) -> pd.DataFrame:
     """Valid throws, classified identically to the pre-match report.
 
@@ -462,13 +501,7 @@ def throw_in_deliveries(ctx: MatchContext, team: str) -> pd.DataFrame:
             retained=pd.Series(dtype=bool), led_to_goal=pd.Series(dtype=bool),
         )
 
-    retained = []
-    for pos in positions:
-        nxt = ev_all.iloc[pos + 1 : pos + 3]
-        nxt = nxt[nxt["squadName"].astype(str) != "nan"]
-        retained.append(bool(len(nxt)) and str(nxt.iloc[0]["squadName"]) == team)
-
-    throws["retained"] = retained
+    throws["retained"] = _retained_flags(ev_all, positions, team)
     throws = classify_throw_ins(throws)
     throws = throws.loc[throws["throw_group"] != ANOMALY_THROW].copy()
     throws["first_touch"] = np.where(throws["retained"], "won", "lost")
