@@ -33,3 +33,21 @@ def test_matches_without_penalties_and_empty_frames_are_untouched():
     df = pd.DataFrame([_row(1, "CORNER", "CORNER", phase=1)])
     assert exclude_penalty_phases(df).equals(df)
     assert exclude_penalty_phases(df.iloc[0:0]).empty
+
+
+def test_throw_in_retention_counts_throws_where_the_team_has_the_next_event():
+    from set_piece_report.metrics import throw_in_retention
+
+    def ev(seq, action_type, squad, match=1, **kw):
+        base = dict(matchId=match, period=1, gameTimeInSec=float(seq), sequenceIndex=seq, actionType=action_type,
+                    squadName=squad, attackingSquadName=squad, startAdjCoordinatesX=20.0, startAdjCoordinatesY=30.0,
+                    endAdjCoordinatesX=25.0, endAdjCoordinatesY=28.0, setPieceId=seq, startPackingZone="WR")
+        return {**base, **kw}
+
+    rows = [ev(1, "THROW_IN", "A"), ev(2, "PASS", "A"),            # retained
+            ev(3, "THROW_IN", "A"), ev(4, "PASS", "B"),            # lost
+            ev(5, "THROW_IN", "B"), ev(6, "PASS", "B"),            # the other team's throw: not counted for A
+            ev(1, "THROW_IN", "A", match=2), ev(2, "PASS", "A", match=2)]   # a second match: events never mix
+    taken, kept = throw_in_retention(pd.DataFrame(rows), "A")
+    assert (taken, kept) == (3, 2)
+    assert throw_in_retention(pd.DataFrame(rows).iloc[0:0], "A") == (0, 0)
