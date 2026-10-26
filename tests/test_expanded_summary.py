@@ -1,5 +1,6 @@
 import pandas as pd
 
+from src.report import metrics
 from src.report.expanded import summary as sm
 
 CHA, OPP = "Charlton Athletic", "Cardiff City"
@@ -29,6 +30,14 @@ def test_score_and_scorers_count_goals_own_goals_and_half_time():
     assert [s["who"] for s in out["scorers"][OPP]] == ["Moylan", "Moylan", "Gal (og)"]
     assert [s["minute"] for s in out["scorers"][OPP]] == ["7'", "60'", "80'"]       # same flooring as the rest of the report
     assert out["home"] == OPP
+
+
+def test_goal_events_credit_own_goals_to_the_other_side_for_the_one_pager():
+    goals = metrics.goal_events(_events())
+    own = goals[-1]
+    assert (own.team, own.player, own.own_goal, own.scorer) == (OPP, "O Gal", True, "Gal (og)")
+    assert [g.own_goal for g in goals[:-1]] == [False, False, False]
+    assert metrics._team_goals(_events(), OPP) == 3
 
 
 def test_key_numbers_show_both_teams_with_duels_as_a_share_of_all_duels():

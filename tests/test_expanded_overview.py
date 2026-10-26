@@ -168,3 +168,74 @@ def test_flow_and_timeline_charts_render_with_late_events_and_share_the_xg_axis(
     assert ov.timeline_chart(events).startswith("data:image/png;base64,")
     assert ov.timeline_chart([("Charlton Athletic", True, []), ("Cardiff City", False, [])]).startswith("data:image/png")
     assert ov.X_AXIS_MAX > 96 and ov.X_AXIS_TICKS[-1] == 90
+
+
+def test_own_goals_are_marked_on_the_scorers_sheet_and_on_the_benefiting_sides_timeline():
+    f7 = _f7()
+    f7.goals.append(SimpleNamespace(minute=70, second=0, scorer_id="a1", assist_id=None, team_id="1", own=True))
+    sheets, end = ov.build_team_sheets(f7, _f24([]))
+    keeper = next(p for p in sheets["away"].players if p.player_id == "a1")
+    assert keeper.own_goals == [70] and keeper.goals == []
+    assert ov._sheet_rows([keeper], end)[0]["marks"] == [{"kind": "own", "text": "70' og"}]
+    home_lane = ov.timeline_events(sheets["home"], sheets["away"])
+    assert {"minute": 70, "kind": "goal", "player": "Keeper (og)"} in home_lane
+    assert all(e["kind"] != "goal" for e in ov.timeline_events(sheets["away"], sheets["home"]))
+    assert ov.team_goals(f7, "1")[-1] == {"who": "Keeper (og)", "min": "70'", "assist": None}
+
+
+def test_an_own_goal_without_the_f7_type_is_recognised_from_the_scorers_team():
+    f7 = _f7()
+    f7.goals.append(SimpleNamespace(minute=70, second=0, scorer_id="a1", assist_id=None, team_id="1"))
+    sheets, _ = ov.build_team_sheets(f7, _f24([]))
+    assert next(p for p in sheets["away"].players if p.player_id == "a1").own_goals == [70]
+
+
+def test_long_surnames_wrap_at_a_hyphen_or_space():
+    assert ov._wrap_name("Leaburn-Washington") == "Leaburn-\nWashington"
+    assert ov._wrap_name("Van Dijk") == "Van\nDijk"
+    assert ov._wrap_name("Gillesphey") == "Gillesphey"
+
+
+def test_lineup_chart_renders_long_names_in_crowded_rows():
+    def player(i, name):
+        return ov.SheetPlayer(str(i), name, name, i, True, "X", off_min=70.0 if i % 3 == 0 else None)
+    names = [["Maynard-Brewer"], ["Edun", "Gillesphey", "Jones", "Ramsay-Haddleton"], ["Coventry", "Docherty"],
+             ["Kanu", "Abankwah-Mensah", "Campbell"], ["Leaburn-Washington"]]
+    slots = [{"player": player(10 * r + i, n), "row": r, "x": (i + 1) / (len(row) + 1), "rows": 5}
+             for r, row in enumerate(names) for i, n in enumerate(row)]
+    assert ov.lineup_chart(slots, True, 95).startswith("data:image/png;base64,")
+
+
+class _Label:
+    """Stands in for a matplotlib text: one minute of axis per character."""
+    def __init__(self, text):
+        self.text, self.x = text, None
+
+    def get_text(self):
+        return self.text
+
+    def set_text(self, text):
+        self.text = text
+
+
+def _place(texts, x):
+    for t in texts:
+        t.x = x
+        x += len(t.text) + .5
+    return x - .5
+
+
+def _spans(items):
+    return [(t[0].x, t[0].x + len(t[0].text)) for _, t in items]
+
+
+def test_timeline_row_labels_never_overlap_each_other_or_a_marker():
+    items = [(m, [_Label(name)]) for m, name in ((26, "Grant"), (31, "Edwards"), (87, "Mwamba"), (90, "Leaburn"), (95, "Ramsay"))]
+    ov._lay_out_row(items, 98.0, _place)
+    spans, markers = _spans(items), [m for m, _ in items]
+    assert spans[1][0] > 31                                          # room to the right: label after its marker
+    assert spans[0][1] < 26                                          # no room before the 31' marker: label before 26'
+    assert all(a[1] <= b[0] for a, b in zip(sorted(spans), sorted(spans)[1:]))
+    assert all(not (s < k < e) for s, e in spans for k in markers)
+    assert all(e <= 98.0 for _, e in spans) and all(s >= 0 for s, _ in spans)
+    assert any(t[0].text.endswith("…") for _, t in items[2:])      # the late crush is shortened, not overprinted

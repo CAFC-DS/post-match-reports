@@ -36,6 +36,7 @@ class SheetPlayer:
     on_min: float = 0.0
     off_min: float | None = None
     goals: list[int] = field(default_factory=list)
+    own_goals: list[int] = field(default_factory=list)
     assists: list[int] = field(default_factory=list)
     yellows: list[int] = field(default_factory=list)
     reds: list[int] = field(default_factory=list)
@@ -214,6 +215,7 @@ def build_team_sheets(f7, f24_events: pd.DataFrame,
     """
     lineups = f7.lineups
     match_end = match_end_minute(f24_events)
+    team_of = {str(r["player_id"]): str(r["team_id"]) for _, r in lineups.iterrows()}
     sheets: dict[str, TeamSheet] = {}
     for side, meta in (("home", f7.home), ("away", f7.away)):
         team_lineup = lineups[lineups["team_id"] == meta.team_id]
@@ -239,7 +241,11 @@ def build_team_sheets(f7, f24_events: pd.DataFrame,
 
         for goal in f7.goals:
             scorer = players.get(str(goal.scorer_id))
-            if scorer is not None and str(goal.team_id) == meta.team_id:
+            if scorer is None:
+                continue
+            if is_own_goal(goal, team_of):              # listed under the other team, scored by one of ours
+                scorer.own_goals.append(int(goal.minute))
+            elif str(goal.team_id) == meta.team_id:
                 scorer.goals.append(int(goal.minute))
             assister = players.get(str(goal.assist_id)) if goal.assist_id else None
             if assister is not None:
@@ -255,6 +261,13 @@ def build_team_sheets(f7, f24_events: pd.DataFrame,
         _assign_roles(sheet, positions, impect_roles(impect_events, sheet))
         sheets[side] = sheet
     return sheets, match_end
+
+
+def is_own_goal(goal, team_of: dict[str, str]) -> bool:
+    """F7 marks an own goal ``Type="Own"`` and lists it under the team it counts for; a scorer
+    from the other team's lineup is treated the same in case the type is missing."""
+    scorer_team = team_of.get(str(goal.scorer_id))
+    return bool(getattr(goal, "own", False)) or (scorer_team is not None and scorer_team != str(goal.team_id))
 
 
 def _positions_for(avg_positions, side, to_adj, sheet: TeamSheet) -> dict[str, tuple[float, float]] | None:
@@ -385,9 +398,12 @@ def _assign_roles(sheet: TeamSheet, positions, roles=None) -> None:
             p.role = known[p.replaced].role
 
 
-def timeline_events(sheet: TeamSheet) -> list[dict[str, Any]]:
-    """Goals, cards and substitutions for one team, for the match timeline."""
+def timeline_events(sheet: TeamSheet, opponent: TeamSheet | None = None) -> list[dict[str, Any]]:
+    """Goals, cards and substitutions for one team, for the match timeline. Own goals scored by
+    ``opponent``'s players count for this team, so they sit on this team's side of the line."""
     out: list[dict[str, Any]] = []
+    for p in (opponent.players if opponent else []):
+        out += [{"minute": m, "kind": "goal", "player": f"{p.last_name} (og)"} for m in p.own_goals]
     for p in sheet.players:
         out += [{"minute": m, "kind": "goal", "player": p.last_name} for m in p.goals]
         out += [{"minute": m, "kind": "yellow", "player": p.last_name} for m in p.yellows]
@@ -428,8 +444,20 @@ def _draw_vertical_pitch(ax, colour: str, aspect: str = "equal") -> None:
         ax.plot([24.84, 24.84, 43.16, 43.16], [y0, yg, yg, y0], **line)
 
 
+def _wrap_name(name: str) -> str:
+    """Break a long surname over two lines at its most central hyphen or space."""
+    cuts = [i for i, c in enumerate(name) if c in "- "]
+    if not cuts:
+        return name
+    i = min(cuts, key=lambda i: abs(i - len(name) / 2))
+    return name[:i + 1].rstrip() + "\n" + name[i + 1:].lstrip() if name[i] == "-" else name[:i] + "\n" + name[i + 1:]
+
+
 def lineup_chart(slots: list[dict[str, Any]], is_charlton: bool, match_end: float) -> str:
-    """Starting XI on a formation grid, attacking up; number in the disc, surname below."""
+    """Starting XI on a formation grid, attacking up; number in the disc, surname below.
+
+    Names are measured: one too wide for its slot is broken over two lines, and if any still does
+    not fit, every name is set in a smaller type, so neighbours never run into each other."""
     import matplotlib.pyplot as plt
 
     from src.report import palette
@@ -440,18 +468,43 @@ def lineup_chart(slots: list[dict[str, Any]], is_charlton: bool, match_end: floa
     _draw_vertical_pitch(ax, palette.HAIR)
     colour = palette.CHARLTON_RED if is_charlton else palette.OPPONENT_GREY
     n_rows = slots[0]["rows"] if slots else 5
+    renderer = fig.canvas.get_renderer()
+    to_data = ax.transData.inverted()
+
+    def extent(t) -> tuple[float, float]:
+        bb = t.get_window_extent(renderer)
+        (x0, y0), (x1, y1) = to_data.transform([(bb.x0, bb.y0), (bb.x1, bb.y1)])
+        return x1 - x0, y1 - y0
+
+    rows: dict[int, list[dict[str, Any]]] = {}
     for s in slots:
-        player = s["player"]
-        x = 6 + s["x"] * 56 if s["row"] else 34
-        y = 9 + s["row"] * (84 / max(n_rows - 1, 1))
-        ax.scatter([x], [y], s=430, c=colour, edgecolors=palette.PAPER, linewidths=1.6, zorder=3)
-        ax.text(x, y, "" if player.shirt is None else str(player.shirt), ha="center", va="center",
-                fontsize=10.5, fontweight="bold", color="white", zorder=4)
-        ax.text(x, y - 6.8, player.last_name.split()[-1], ha="center", va="top", fontsize=7.8,
-                fontweight="bold", color=palette.INK, zorder=4)
-        if player.off_min is not None:
-            ax.text(x, y - 11.9, f"▼ {int(player.off_min)}'", ha="center", va="top", fontsize=6.6,
-                    color=palette.MUTED, zorder=4)
+        rows.setdefault(s["row"], []).append(s)
+    names: dict[int, list[Any]] = {}
+    size = 7.8                                                         # one type size for every name
+    for row, members in rows.items():
+        room = (56 / (len(members) + 1) if len(members) > 1 else 56) - 1.2   # slot width, less a gap
+        names[row] = []
+        for m in members:
+            name = m["player"].last_name.split()[-1]
+            t = ax.text(6 + m["x"] * 56 if row else 34, 0, name, ha="center", va="top", fontsize=7.8,
+                        fontweight="bold", color=palette.INK, zorder=4, linespacing=1.0)
+            if extent(t)[0] > room:
+                t.set_text(_wrap_name(name))
+            names[row].append(t)
+        widest = max(extent(t)[0] for t in names[row])
+        size = min(size, max(5.4, 7.8 * room / widest))
+    for row, members in rows.items():
+        y = 9 + row * (84 / max(n_rows - 1, 1))
+        for m, t in zip(members, names[row]):
+            player, x = m["player"], t.get_position()[0]
+            ax.scatter([x], [y], s=430, c=colour, edgecolors=palette.PAPER, linewidths=1.6, zorder=3)
+            ax.text(x, y, "" if player.shirt is None else str(player.shirt), ha="center", va="center",
+                    fontsize=10.5, fontweight="bold", color="white", zorder=4)
+            t.set_fontsize(size)
+            t.set_y(y - 6.0)
+            if player.off_min is not None:
+                ax.text(x, y - 6.0 - extent(t)[1] - .6, f"▼ {int(player.off_min)}'", ha="center", va="top",
+                        fontsize=min(6.6, size), color=palette.MUTED, zorder=4)
     return _png_uri(fig, tight=False)
 
 
@@ -510,72 +563,125 @@ def flow_timeline_chart(x, y, *, y_label: str = "Territory (m)", figsize=(16.0, 
     return _png_uri(fig, tight=False, dpi=200)
 
 
+def _lay_out_row(items: list[tuple[float, list[Any]]], x_max: float, place) -> None:
+    """Place one timeline row's labels, ``[(marker minute, [text parts]), ...]`` in match order.
+
+    Worked from the right: a label sits just right of its marker when it ends before the next
+    label and clears every marker, otherwise just left of it, and when neither fits it is cut
+    short with an ellipsis on whichever side has more room. ``place(texts, x)`` lays a label out
+    from ``x`` and returns where it ends."""
+    gap, pad = .9, .6
+    markers = [m for m, _ in items]
+
+    def clear(start: float, end: float) -> bool:
+        return start >= .3 and end <= limit and not any(start - pad < k < end + pad for k in markers)
+
+    limit = x_max - .2
+    for i in range(len(items) - 1, -1, -1):
+        m, texts = items[i]
+        width = place(texts, 0.0)
+        floor = max([k for k in markers[:i] if k < m] + [-99.0]) + pad
+        if clear(m + gap, m + gap + width):
+            start = m + gap
+        elif clear(m - gap - width, m - gap):
+            start = m - gap - width
+        else:                                                        # cut the name down to the larger gap
+            right, left = limit - (m + gap), (m - gap) - max(floor, .3)
+            room = max(right, left)
+            name = texts[0].get_text()
+            while len(name) > 1 and place(texts, 0.0) > room:
+                name = name[:-1]
+                texts[0].set_text(name.rstrip(" -/") + "…")
+            width = place(texts, 0.0)
+            start = m + gap if right >= left else m - gap - width
+        place(texts, start)
+        limit = min(start, m) - .8
+
+
 def timeline_chart(timeline_by_team: list[tuple[str, bool, list[dict[str, Any]]]]) -> str:
-    """Match timeline: each team's goals, cards and substitutions on the 0-98
-    minute axis, the subject above the line and the opponent below it.
+    """Match timeline: each team's goals, cards and substitutions on the 0-98 minute axis, the
+    subject above the line and the opponent below it.
 
-    One type scale (goals bold, everything else regular); substitutions at the
-    same minute share one label; labels stack on three levels so they never
-    overlap and late events are pulled inside the axis.
+    Every event type has its own row (goals outermost, then cards, then substitutions next to the
+    line), so each label has a fixed place and sits beside its marker with no stems. Goals carry
+    the score after them, subject first. Substitutions at the same minute share one marker, and
+    :func:`_lay_out_row` keeps every label clear of the others and of the markers.
 
-    ``timeline_by_team`` is ``[(team name, is_subject, events), ...]`` as
-    returned by :func:`timeline_events`.
+    ``timeline_by_team`` is ``[(team name, is_subject, events), ...]`` as returned by
+    :func:`timeline_events`.
     """
-    import matplotlib.patheffects as pe
     import matplotlib.pyplot as plt
     from matplotlib.patches import FancyBboxPatch
 
     from src.report import palette
 
-    font, levels, x_max = 10.5, 4, X_AXIS_MAX
-    base, label_gap, step = .5, .26, .45          # in marker units: lane offset, label offset, label level spacing
+    font, x_max = 10.0, X_AXIS_MAX
+    rows = {"goal": 2.5, "card": 1.55, "sub": .6}                     # distance from the line, per side
     fig, ax = plt.subplots(figsize=(16.0, 2.2), facecolor=palette.PAPER)
     fig.subplots_adjust(left=0.07, right=0.99, top=0.99, bottom=0.2)
     ax.set_facecolor(palette.PAPER)
-    _style_time_axis(ax, font)
-    ax.set_ylim(-2.35, 2.35)
+    _style_time_axis(ax, font + .5)
+    ax.set_ylim(-3.2, 3.2)
     ax.set_yticks([])
     ax.spines["bottom"].set_visible(False)
-    ax.axhline(0, color=palette.INK, linewidth=1.0, zorder=5)
+    ax.axhline(0, color=palette.HAIR, linewidth=1.2, zorder=1)
+    renderer = fig.canvas.get_renderer()
+    to_data = ax.transData.inverted()
 
-    halo = [pe.withStroke(linewidth=2.6, foreground=palette.PAPER)]
-    char_w = .56                       # width of one character in minutes at this size
+    def right_end(t) -> float:
+        return to_data.transform((t.get_window_extent(renderer).x1, 0))[0]
+
+    def place_group(texts: list[Any], x: float) -> float:
+        """Set a label's parts side by side from ``x``; returns where the label ends."""
+        for t in texts:
+            t.set_x(x)
+            x = right_end(t) + .5
+        return x - .5
+
+    goals = sorted((float(e["minute"]), lane) for lane, (_, _, events) in enumerate(timeline_by_team)
+                   for e in events if e["kind"] == "goal")
+    score, after = [0, 0], {}
+    for minute, lane in goals:
+        score[lane] += 1
+        after.setdefault((lane, minute), []).append(f"{score[0]}–{score[1]}")
+
     for lane, (team, is_subject, events) in enumerate(timeline_by_team):
         sign = 1 if lane == 0 else -1
         colour = palette.CHARLTON_RED if is_subject else palette.OPPONENT_GREY
-        right_edge = [-99.0] * levels  # where each label level is already occupied up to
+        for row, y in rows.items():
+            ax.axhline(sign * y, color=palette.HAIR_SOFT, linewidth=.6, zorder=0)
+            ax.text(-.8, sign * y, {"goal": "Goals", "card": "Cards", "sub": "Subs on"}[row], ha="right",
+                    va="center", fontsize=font - 1.5, color=palette.MUTED, clip_on=False)
+        placed: dict[str, list[tuple[float, list[Any]]]] = {row: [] for row in rows}
         for e in _merge_substitutions(events):
-            m, kind = min(float(e["minute"]), x_max - 1.6), e["kind"]
-            y0 = sign * base
+            m, kind = min(float(e["minute"]), x_max - 1.0), e["kind"]
+            row = "card" if kind in ("yellow", "red") else ("goal" if kind == "goal" else "sub")
+            y = sign * rows[row]
             if kind == "goal":
-                ax.scatter([m], [y0], s=170, c=colour, edgecolors=palette.PAPER, linewidths=1.3, zorder=6)
-            elif kind in ("yellow", "red"):
-                face = "#e0b12a" if kind == "yellow" else palette.CHARLTON_RED_DARK
-                ax.add_patch(FancyBboxPatch((m - .55, y0 - .2), 1.1, .4, boxstyle="round,pad=0,rounding_size=.15",
-                                            facecolor=face, edgecolor="none", zorder=6))
+                ax.scatter([m], [y], s=120, c=colour, edgecolors=palette.PAPER, linewidths=1.3, zorder=5)
+            elif row == "card":
+                ax.add_patch(FancyBboxPatch((m - .35, y - .22), .7, .44, boxstyle="round,pad=0,rounding_size=.12",
+                                            facecolor="#e0b12a" if kind == "yellow" else palette.CHARLTON_RED_DARK,
+                                            edgecolor="none", zorder=5))
             else:
-                ax.scatter([m], [y0], s=95, marker="^" if sign > 0 else "v", c=palette.SUCCESS_GREEN,
-                           edgecolors=palette.PAPER, linewidths=.9, zorder=6)
-            text = f"{e['player']} {int(e['minute'])}'"
-            half = len(text) * char_w / 2
-            centre = min(max(m, half + .3), x_max - half - .3)       # keep the label inside the axes
-            level = next((i for i in range(levels) if centre - half > right_edge[i] + .8), levels - 1)
-            right_edge[level] = centre + half
-            label_y = sign * (base + label_gap + level * step)
-            if level:                                                   # a thin stem ties a raised label to its marker
-                ax.plot([m, m], [sign * (base + .16), label_y - sign * .03], color=palette.HAIR, linewidth=.8, zorder=2)
-            ax.text(centre, label_y, text, ha="center",
-                    va="bottom" if sign > 0 else "top", fontsize=font, zorder=7, path_effects=halo,
-                    fontweight="bold" if kind == "goal" else "normal",
-                    color=colour if kind == "goal" else palette.INK)
-    legend = [(f"{timeline_by_team[0][0]} (above)", palette.CHARLTON_RED, "\u25cf"),
-              (f"{timeline_by_team[1][0]} (below)", palette.OPPONENT_GREY, "\u25cf")] if len(timeline_by_team) > 1 else []
-    legend += [("goal", palette.INK, "\u25cf"), ("yellow card", "#c99a1c", "\u25a0"),
-               ("red card", palette.CHARLTON_RED_DARK, "\u25a0"), ("substitution (player on)", palette.SUCCESS_GREEN, "\u25b2")]
+                ax.scatter([m], [y], s=60, marker="^", c=palette.SUCCESS_GREEN, edgecolors="none", zorder=5)
+            parts = [(e["player"] + (f" {int(e['minute'])}'" if kind == "goal" else ""),
+                      colour if kind == "goal" else palette.INK, "bold" if kind == "goal" else "normal")]
+            if kind == "goal" and after.get((lane, float(e["minute"]))):
+                parts.append((after[(lane, float(e["minute"]))].pop(0), palette.INK, "bold"))
+            placed[row].append((m, [ax.text(0, y, t, ha="left", va="center", fontsize=font, color=c, fontweight=w,
+                                            zorder=6) for t, c, w in parts]))
+        for items in placed.values():
+            _lay_out_row(items, x_max, place_group)
+    names = [t for t, _, _ in timeline_by_team]
+    key = [(f"{names[0]} above the line", palette.CHARLTON_RED)] + ([(f"{names[1]} below", palette.OPPONENT_GREY)]
+                                                                     if len(names) > 1 else [])
+    key += [("● goal, with the score after it", palette.MUTED), ("■ yellow", "#c99a1c"),
+            ("■ red", palette.CHARLTON_RED_DARK), ("▲ substitution, who came on", palette.SUCCESS_GREEN)]
     x0 = 0.07
-    for label, face, marker in legend:
-        fig.text(x0, 0.015, f"{marker} {label}", fontsize=font, color=face, ha="left")
-        x0 += 0.012 * len(label) * .62 + 0.04
+    for text, c in key:
+        t = fig.text(x0, 0.015, text, fontsize=font, color=c, ha="left")
+        x0 = fig.transFigure.inverted().transform((t.get_window_extent(renderer).x1, 0))[0] + .018
     return _png_uri(fig, tight=False, dpi=200)
 
 
@@ -592,6 +698,7 @@ def _sheet_rows(players: list[SheetPlayer], match_end: float) -> list[dict[str, 
     for p in players:
         marks: list[dict[str, Any]] = []
         marks += [{"kind": "goal", "text": f"{m}'"} for m in p.goals]
+        marks += [{"kind": "own", "text": f"{m}' og"} for m in p.own_goals]
         marks += [{"kind": "assist", "text": f"{m}'"} for m in p.assists]
         marks += [{"kind": "yellow", "text": f"{m}'"} for m in p.yellows]
         marks += [{"kind": "red", "text": f"{m}'"} for m in p.reds]
@@ -608,12 +715,14 @@ def team_goals(f7, team_id: str) -> list[dict[str, Any]]:
     """``[{"who", "min", "assist"}]`` for goals *credited to* ``team_id``
     (an own goal counts for the side it benefits), in match order."""
     names = {str(r["player_id"]): str(r["last_name"]) for _, r in f7.lineups.iterrows()}
+    team_of = {str(r["player_id"]): str(r["team_id"]) for _, r in f7.lineups.iterrows()}
     out = []
     for goal in sorted(f7.goals, key=lambda g: (g.minute, g.second or 0)):
         if str(goal.team_id) != str(team_id):
             continue
-        out.append({"who": names.get(str(goal.scorer_id), "?"), "min": f"{int(goal.minute)}'",
-                    "assist": names.get(str(goal.assist_id)) if goal.assist_id else None})
+        own = is_own_goal(goal, team_of)
+        out.append({"who": names.get(str(goal.scorer_id), "?") + (" (og)" if own else ""), "min": f"{int(goal.minute)}'",
+                    "assist": names.get(str(goal.assist_id)) if goal.assist_id and not own else None})
     return out
 
 
@@ -657,5 +766,6 @@ def overview_context(f7, f24_events: pd.DataFrame, avg_positions, to_adj, impect
             "goals": team_goals(f7, sheet.team_id),
             "ht": half_time_score(f7, f24_events)[sheet.team_id],
         })
-    timeline_by_team = [(sh.name, sh.name.lower() == subject.lower(), timeline_events(sh)) for sh in ordered]
+    timeline_by_team = [(sh.name, sh.name.lower() == subject.lower(), timeline_events(sh, other))
+                        for sh, other in zip(ordered, ordered[::-1])]
     return {"team_sheets": cards, "timeline_by_team": timeline_by_team, "match_end_minute": match_end}

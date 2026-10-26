@@ -69,7 +69,7 @@ class MatchMeta:
 def _team_goals(events: pd.DataFrame, team: str) -> int:
     return int(
         ((events["action"] == "GOAL") & (events["squadName"] == team)).sum()
-        + ((events["action"] == "OWN_GOAL") & (events["squadName"] != team)).sum()
+        + (_is_own_goal(events) & (events["squadName"] != team)).sum()
     )
 
 
@@ -93,11 +93,17 @@ def match_meta(events: pd.DataFrame) -> MatchMeta:
 # --------------------------------------------------------------------------- #
 @dataclass(frozen=True)
 class GoalEvent:
-    team: str
+    team: str           # the team the goal counts for (for an own goal, not the scorer's)
     player: str
     minute_label: str   # football-standard label, e.g. "74'" / "45+3'"
     minute: float       # numeric minute, for x-axis placement
     game_time_sec: float
+    own_goal: bool = False
+
+    @property
+    def scorer(self) -> str:
+        """Surname, marked "(og)" for an own goal."""
+        return self.player.split()[-1] + (" (og)" if self.own_goal else "")
 
 
 def _minute_label(game_time: str) -> str:
@@ -126,15 +132,24 @@ def _minute_label(game_time: str) -> str:
     return f"{minute}'"
 
 
+def _is_own_goal(events: pd.DataFrame) -> pd.Series:
+    own = events["action"] == "OWN_GOAL"
+    return own | (events["actionType"] == "OWN_GOAL") if "actionType" in events else own
+
+
 def goal_events(events: pd.DataFrame) -> list[GoalEvent]:
-    goals = events.loc[events["action"] == "GOAL"].sort_values("gameTimeInSec")
+    """Every goal in match order, own goals included and credited to the side they count for."""
+    own = _is_own_goal(events)
+    goals = events.assign(_own=own).loc[(events["action"] == "GOAL") | own].sort_values("gameTimeInSec")
+    home, away = str(events["homeSquadName"].iloc[0]), str(events["awaySquadName"].iloc[0])
     return [
         GoalEvent(
-            team=str(r["squadName"]),
+            team=(away if str(r["squadName"]) == home else home) if r["_own"] else str(r["squadName"]),
             player=str(r["playerName"]),
             minute_label=_minute_label(str(r["gameTime"])),
             minute=minute_num(str(r["gameTime"])),
             game_time_sec=float(r["gameTimeInSec"]),
+            own_goal=bool(r["_own"]),
         )
         for _, r in goals.iterrows()
     ]
@@ -434,7 +449,7 @@ def timeline(events: pd.DataFrame, home: str, away: str) -> list[TimelineEvent]:
     populating them, they appear with no further change.
     """
     out: list[TimelineEvent] = [
-        TimelineEvent(g.minute, g.team, "goal", g.player.split()[-1]) for g in goal_events(events)
+        TimelineEvent(g.minute, g.team, "goal", g.scorer) for g in goal_events(events)
     ]
 
     for col, kind in (("YELLOW_CARD", "yellow"), ("SECOND_YELLOW_CARD", "red"), ("RED_CARD", "red")):

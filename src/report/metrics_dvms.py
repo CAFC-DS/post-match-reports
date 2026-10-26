@@ -318,7 +318,8 @@ def goal_markers(match: DvmsMatch) -> list[dict]:
         out.append({
             "minute": g.minute + (g.second or 0) / 60.0,
             "team": team_name,
-            "label": f"{match.last_name(g.scorer_id)} {g.minute}'" if g.scorer_id else f"{g.minute}'",
+            "label": (f"{match.last_name(g.scorer_id)}{' (og)' if g.own else ''} {g.minute}'"
+                      if g.scorer_id else f"{g.minute}'"),
         })
     return out
 
