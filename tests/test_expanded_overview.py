@@ -168,3 +168,39 @@ def test_flow_and_timeline_charts_render_with_late_events_and_share_the_xg_axis(
     assert ov.timeline_chart(events).startswith("data:image/png;base64,")
     assert ov.timeline_chart([("Charlton Athletic", True, []), ("Cardiff City", False, [])]).startswith("data:image/png")
     assert ov.X_AXIS_MAX > 96 and ov.X_AXIS_TICKS[-1] == 90
+
+
+def test_own_goals_are_marked_on_the_scorers_sheet_and_on_the_benefiting_sides_timeline():
+    f7 = _f7()
+    f7.goals.append(SimpleNamespace(minute=70, second=0, scorer_id="a1", assist_id=None, team_id="1", own=True))
+    sheets, end = ov.build_team_sheets(f7, _f24([]))
+    keeper = next(p for p in sheets["away"].players if p.player_id == "a1")
+    assert keeper.own_goals == [70] and keeper.goals == []
+    assert ov._sheet_rows([keeper], end)[0]["marks"] == [{"kind": "own", "text": "70' og"}]
+    home_lane = ov.timeline_events(sheets["home"], sheets["away"])
+    assert {"minute": 70, "kind": "goal", "player": "Keeper (og)"} in home_lane
+    assert all(e["kind"] != "goal" for e in ov.timeline_events(sheets["away"], sheets["home"]))
+    assert ov.team_goals(f7, "1")[-1] == {"who": "Keeper (og)", "min": "70'", "assist": None}
+
+
+def test_an_own_goal_without_the_f7_type_is_recognised_from_the_scorers_team():
+    f7 = _f7()
+    f7.goals.append(SimpleNamespace(minute=70, second=0, scorer_id="a1", assist_id=None, team_id="1"))
+    sheets, _ = ov.build_team_sheets(f7, _f24([]))
+    assert next(p for p in sheets["away"].players if p.player_id == "a1").own_goals == [70]
+
+
+def test_long_surnames_wrap_at_a_hyphen_or_space():
+    assert ov._wrap_name("Leaburn-Washington") == "Leaburn-\nWashington"
+    assert ov._wrap_name("Van Dijk") == "Van\nDijk"
+    assert ov._wrap_name("Gillesphey") == "Gillesphey"
+
+
+def test_lineup_chart_renders_long_names_in_crowded_rows():
+    def player(i, name):
+        return ov.SheetPlayer(str(i), name, name, i, True, "X", off_min=70.0 if i % 3 == 0 else None)
+    names = [["Maynard-Brewer"], ["Edun", "Gillesphey", "Jones", "Ramsay-Haddleton"], ["Coventry", "Docherty"],
+             ["Kanu", "Abankwah-Mensah", "Campbell"], ["Leaburn-Washington"]]
+    slots = [{"player": player(10 * r + i, n), "row": r, "x": (i + 1) / (len(row) + 1), "rows": 5}
+             for r, row in enumerate(names) for i, n in enumerate(row)]
+    assert ov.lineup_chart(slots, True, 95).startswith("data:image/png;base64,")

@@ -39,7 +39,8 @@ class Goal:
     second: Optional[int]
     scorer_id: Optional[str]   # bare numeric
     assist_id: Optional[str]   # bare numeric, None if unassisted
-    team_id: Optional[str]     # bare numeric of the scoring team
+    team_id: Optional[str]     # bare numeric of the team the goal counts for
+    own: bool = False          # an own goal: the scorer plays for the *other* team
 
 
 @dataclass
@@ -130,6 +131,7 @@ def parse_f7(xml_text: str) -> F7Match:
                     scorer_id=_strip("p", goal.get("PlayerRef")),
                     assist_id=_strip("p", assist_el.get("PlayerRef")) if assist_el is not None else None,
                     team_id=tid,
+                    own=goal.get("Type", "") == "Own",
                 )
             )
 

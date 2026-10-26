@@ -38,16 +38,10 @@ def score_and_scorers(events: pd.DataFrame, subject: str, opponent: str) -> dict
     half = {subject: 0, opponent: 0}
     scorers: dict[str, list[dict[str, str]]] = {subject: [], opponent: []}
     home = str(events["homeSquadName"].iloc[0])
-    own = events[events["actionType"] == "OWN_GOAL"]
-    for g in goals:
+    for g in goals:                                            # an own goal is already credited to the other side
         totals[g.team] += 1
         half[g.team] += int(g.game_time_sec <= first_half_end)
-        scorers[g.team].append({"who": g.player.split()[-1], "minute": f"{int(g.minute)}'"})
-    for r in own.itertuples():                                 # an own goal counts for the other side
-        other = opponent if str(r.squadName) == subject else subject
-        totals[other] += 1
-        half[other] += int(r.gameTimeInSec <= first_half_end)
-        scorers[other].append({"who": f"{str(r.playerName).split()[-1]} (og)", "minute": f"{int(metrics.minute_num(str(r.gameTime)))}'"})
+        scorers[g.team].append({"who": g.scorer, "minute": f"{int(g.minute)}'"})
     return {"score": totals, "half_time": half, "scorers": scorers, "home": home}
 
 
