@@ -563,88 +563,125 @@ def flow_timeline_chart(x, y, *, y_label: str = "Territory (m)", figsize=(16.0, 
     return _png_uri(fig, tight=False, dpi=200)
 
 
+def _lay_out_row(items: list[tuple[float, list[Any]]], x_max: float, place) -> None:
+    """Place one timeline row's labels, ``[(marker minute, [text parts]), ...]`` in match order.
+
+    Worked from the right: a label sits just right of its marker when it ends before the next
+    label and clears every marker, otherwise just left of it, and when neither fits it is cut
+    short with an ellipsis on whichever side has more room. ``place(texts, x)`` lays a label out
+    from ``x`` and returns where it ends."""
+    gap, pad = .9, .6
+    markers = [m for m, _ in items]
+
+    def clear(start: float, end: float) -> bool:
+        return start >= .3 and end <= limit and not any(start - pad < k < end + pad for k in markers)
+
+    limit = x_max - .2
+    for i in range(len(items) - 1, -1, -1):
+        m, texts = items[i]
+        width = place(texts, 0.0)
+        floor = max([k for k in markers[:i] if k < m] + [-99.0]) + pad
+        if clear(m + gap, m + gap + width):
+            start = m + gap
+        elif clear(m - gap - width, m - gap):
+            start = m - gap - width
+        else:                                                        # cut the name down to the larger gap
+            right, left = limit - (m + gap), (m - gap) - max(floor, .3)
+            room = max(right, left)
+            name = texts[0].get_text()
+            while len(name) > 1 and place(texts, 0.0) > room:
+                name = name[:-1]
+                texts[0].set_text(name.rstrip(" -/") + "…")
+            width = place(texts, 0.0)
+            start = m + gap if right >= left else m - gap - width
+        place(texts, start)
+        limit = min(start, m) - .8
+
+
 def timeline_chart(timeline_by_team: list[tuple[str, bool, list[dict[str, Any]]]]) -> str:
-    """Match timeline: each team's goals, cards and substitutions on the 0-98
-    minute axis, the subject above the line and the opponent below it.
+    """Match timeline: each team's goals, cards and substitutions on the 0-98 minute axis, the
+    subject above the line and the opponent below it.
 
-    One type scale (goals bold, everything else regular); substitutions at the
-    same minute share one label; labels stack on three levels so they never
-    overlap and late events are pulled inside the axis.
+    Every event type has its own row (goals outermost, then cards, then substitutions next to the
+    line), so each label has a fixed place and sits beside its marker with no stems. Goals carry
+    the score after them, subject first. Substitutions at the same minute share one marker, and
+    :func:`_lay_out_row` keeps every label clear of the others and of the markers.
 
-    ``timeline_by_team`` is ``[(team name, is_subject, events), ...]`` as
-    returned by :func:`timeline_events`.
+    ``timeline_by_team`` is ``[(team name, is_subject, events), ...]`` as returned by
+    :func:`timeline_events`.
     """
-    import matplotlib.patheffects as pe
     import matplotlib.pyplot as plt
     from matplotlib.patches import FancyBboxPatch
 
     from src.report import palette
 
-    font, levels, x_max = 10.5, 4, X_AXIS_MAX
-    base, label_gap, step = .5, .26, .45          # in marker units: lane offset, label offset, label level spacing
+    font, x_max = 10.0, X_AXIS_MAX
+    rows = {"goal": 2.5, "card": 1.55, "sub": .6}                     # distance from the line, per side
     fig, ax = plt.subplots(figsize=(16.0, 2.2), facecolor=palette.PAPER)
     fig.subplots_adjust(left=0.07, right=0.99, top=0.99, bottom=0.2)
     ax.set_facecolor(palette.PAPER)
-    _style_time_axis(ax, font)
-    ax.set_ylim(-2.35, 2.35)
+    _style_time_axis(ax, font + .5)
+    ax.set_ylim(-3.2, 3.2)
     ax.set_yticks([])
     ax.spines["bottom"].set_visible(False)
-    ax.axhline(0, color=palette.INK, linewidth=1.0, zorder=5)
-
-    halo = [pe.withStroke(linewidth=2.6, foreground=palette.PAPER)]
+    ax.axhline(0, color=palette.HAIR, linewidth=1.2, zorder=1)
     renderer = fig.canvas.get_renderer()
     to_data = ax.transData.inverted()
 
-    def extent(t) -> tuple[float, float]:
-        bb = t.get_window_extent(renderer)
-        (x0, y0), (x1, y1) = to_data.transform([(bb.x0, bb.y0), (bb.x1, bb.y1)])
-        return x1 - x0, y1 - y0
+    def right_end(t) -> float:
+        return to_data.transform((t.get_window_extent(renderer).x1, 0))[0]
 
-    # Levels as close as the measured type allows, and only as many as fit inside the axes.
-    probe = ax.text(0, 0, "Ag 90'", fontsize=font, fontweight="bold")
-    line_h = extent(probe)[1]
-    probe.remove()
-    step = max(step, line_h + .03)
-    levels = max(1, min(levels, int((ax.get_ylim()[1] - base - label_gap - line_h) / step) + 1))
+    def place_group(texts: list[Any], x: float) -> float:
+        """Set a label's parts side by side from ``x``; returns where the label ends."""
+        for t in texts:
+            t.set_x(x)
+            x = right_end(t) + .5
+        return x - .5
+
+    goals = sorted((float(e["minute"]), lane) for lane, (_, _, events) in enumerate(timeline_by_team)
+                   for e in events if e["kind"] == "goal")
+    score, after = [0, 0], {}
+    for minute, lane in goals:
+        score[lane] += 1
+        after.setdefault((lane, minute), []).append(f"{score[0]}–{score[1]}")
+
     for lane, (team, is_subject, events) in enumerate(timeline_by_team):
         sign = 1 if lane == 0 else -1
         colour = palette.CHARLTON_RED if is_subject else palette.OPPONENT_GREY
-        right_edge = [-99.0] * levels  # where each label level is already occupied up to
+        for row, y in rows.items():
+            ax.axhline(sign * y, color=palette.HAIR_SOFT, linewidth=.6, zorder=0)
+            ax.text(-.8, sign * y, {"goal": "Goals", "card": "Cards", "sub": "Subs on"}[row], ha="right",
+                    va="center", fontsize=font - 1.5, color=palette.MUTED, clip_on=False)
+        placed: dict[str, list[tuple[float, list[Any]]]] = {row: [] for row in rows}
         for e in _merge_substitutions(events):
-            m, kind = min(float(e["minute"]), x_max - 1.6), e["kind"]
-            y0 = sign * base
+            m, kind = min(float(e["minute"]), x_max - 1.0), e["kind"]
+            row = "card" if kind in ("yellow", "red") else ("goal" if kind == "goal" else "sub")
+            y = sign * rows[row]
             if kind == "goal":
-                ax.scatter([m], [y0], s=170, c=colour, edgecolors=palette.PAPER, linewidths=1.3, zorder=6)
-            elif kind in ("yellow", "red"):
-                face = "#e0b12a" if kind == "yellow" else palette.CHARLTON_RED_DARK
-                ax.add_patch(FancyBboxPatch((m - .55, y0 - .2), 1.1, .4, boxstyle="round,pad=0,rounding_size=.15",
-                                            facecolor=face, edgecolor="none", zorder=6))
+                ax.scatter([m], [y], s=120, c=colour, edgecolors=palette.PAPER, linewidths=1.3, zorder=5)
+            elif row == "card":
+                ax.add_patch(FancyBboxPatch((m - .35, y - .22), .7, .44, boxstyle="round,pad=0,rounding_size=.12",
+                                            facecolor="#e0b12a" if kind == "yellow" else palette.CHARLTON_RED_DARK,
+                                            edgecolor="none", zorder=5))
             else:
-                ax.scatter([m], [y0], s=95, marker="^" if sign > 0 else "v", c=palette.SUCCESS_GREEN,
-                           edgecolors=palette.PAPER, linewidths=.9, zorder=6)
-            label = ax.text(0, 0, f"{e['player']} {int(e['minute'])}'", ha="center",
-                            va="bottom" if sign > 0 else "top", fontsize=font, zorder=7, path_effects=halo,
-                            fontweight="bold" if kind == "goal" else "normal",
-                            color=colour if kind == "goal" else palette.INK)
-            half = extent(label)[0] / 2
-            centre = min(max(m, half + .3), x_max - half - .3)       # keep the label inside the axes
-            level = next((i for i in range(levels) if centre - half > right_edge[i] + .8), None)
-            if level is None:                                           # every level is taken here: slide right
-                level = min(range(levels), key=lambda i: right_edge[i])
-                centre = min(right_edge[level] + .8 + half, x_max - half - .3)
-            right_edge[level] = centre + half
-            label_y = sign * (base + label_gap + level * step)
-            label.set_position((centre, label_y))
-            if level:                                                   # a thin stem ties a raised label to its marker
-                ax.plot([m, m], [sign * (base + .16), label_y - sign * .03], color=palette.HAIR, linewidth=.8, zorder=2)
-    legend = [(f"{timeline_by_team[0][0]} (above)", palette.CHARLTON_RED, "\u25cf"),
-              (f"{timeline_by_team[1][0]} (below)", palette.OPPONENT_GREY, "\u25cf")] if len(timeline_by_team) > 1 else []
-    legend += [("goal", palette.INK, "\u25cf"), ("yellow card", "#c99a1c", "\u25a0"),
-               ("red card", palette.CHARLTON_RED_DARK, "\u25a0"), ("substitution (player on)", palette.SUCCESS_GREEN, "\u25b2")]
+                ax.scatter([m], [y], s=60, marker="^", c=palette.SUCCESS_GREEN, edgecolors="none", zorder=5)
+            parts = [(e["player"] + (f" {int(e['minute'])}'" if kind == "goal" else ""),
+                      colour if kind == "goal" else palette.INK, "bold" if kind == "goal" else "normal")]
+            if kind == "goal" and after.get((lane, float(e["minute"]))):
+                parts.append((after[(lane, float(e["minute"]))].pop(0), palette.INK, "bold"))
+            placed[row].append((m, [ax.text(0, y, t, ha="left", va="center", fontsize=font, color=c, fontweight=w,
+                                            zorder=6) for t, c, w in parts]))
+        for items in placed.values():
+            _lay_out_row(items, x_max, place_group)
+    names = [t for t, _, _ in timeline_by_team]
+    key = [(f"{names[0]} above the line", palette.CHARLTON_RED)] + ([(f"{names[1]} below", palette.OPPONENT_GREY)]
+                                                                     if len(names) > 1 else [])
+    key += [("● goal, with the score after it", palette.MUTED), ("■ yellow", "#c99a1c"),
+            ("■ red", palette.CHARLTON_RED_DARK), ("▲ substitution, who came on", palette.SUCCESS_GREEN)]
     x0 = 0.07
-    for label, face, marker in legend:
-        fig.text(x0, 0.015, f"{marker} {label}", fontsize=font, color=face, ha="left")
-        x0 += 0.012 * len(label) * .62 + 0.04
+    for text, c in key:
+        t = fig.text(x0, 0.015, text, fontsize=font, color=c, ha="left")
+        x0 = fig.transFigure.inverted().transform((t.get_window_extent(renderer).x1, 0))[0] + .018
     return _png_uri(fig, tight=False, dpi=200)
 
 

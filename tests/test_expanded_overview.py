@@ -204,3 +204,38 @@ def test_lineup_chart_renders_long_names_in_crowded_rows():
     slots = [{"player": player(10 * r + i, n), "row": r, "x": (i + 1) / (len(row) + 1), "rows": 5}
              for r, row in enumerate(names) for i, n in enumerate(row)]
     assert ov.lineup_chart(slots, True, 95).startswith("data:image/png;base64,")
+
+
+class _Label:
+    """Stands in for a matplotlib text: one minute of axis per character."""
+    def __init__(self, text):
+        self.text, self.x = text, None
+
+    def get_text(self):
+        return self.text
+
+    def set_text(self, text):
+        self.text = text
+
+
+def _place(texts, x):
+    for t in texts:
+        t.x = x
+        x += len(t.text) + .5
+    return x - .5
+
+
+def _spans(items):
+    return [(t[0].x, t[0].x + len(t[0].text)) for _, t in items]
+
+
+def test_timeline_row_labels_never_overlap_each_other_or_a_marker():
+    items = [(m, [_Label(name)]) for m, name in ((26, "Grant"), (31, "Edwards"), (87, "Mwamba"), (90, "Leaburn"), (95, "Ramsay"))]
+    ov._lay_out_row(items, 98.0, _place)
+    spans, markers = _spans(items), [m for m, _ in items]
+    assert spans[1][0] > 31                                          # room to the right: label after its marker
+    assert spans[0][1] < 26                                          # no room before the 31' marker: label before 26'
+    assert all(a[1] <= b[0] for a, b in zip(sorted(spans), sorted(spans)[1:]))
+    assert all(not (s < k < e) for s, e in spans for k in markers)
+    assert all(e <= 98.0 for _, e in spans) and all(s >= 0 for s, _ in spans)
+    assert any(t[0].text.endswith("…") for _, t in items[2:])      # the late crush is shortened, not overprinted
