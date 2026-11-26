@@ -164,7 +164,14 @@ _ROLE_DEPTH = {"LB": 0, "RB": 0, "LWB": 0, "RWB": 0, "LCB": 0, "CB": 0, "RCB": 0
                "LM": 2, "RM": 2, "LW": 3, "RW": 3, "AM": 3, "SS": 4, "CF": 5}
 
 
-_SIDE_X = {0: .1, 1: .32, 2: .5, 3: .68, 4: .9}   # side rank -> fraction across the pitch, left to right
+# Where Impect's lineup graphic puts each position, measured off its own pitch
+# drawings (Charlton 4-3-3 and Lincoln 4-4-2 flat, Nov 2026): side rank ->
+# fraction of the pitch width from the left touchline, and role -> fraction of
+# the pitch length from the team's own goal line.
+_SIDE_X = {0: .125, 1: .375, 2: .5, 3: .625, 4: .875}
+_ROLE_Y = {"GK": .11, "LCB": .29, "CB": .29, "RCB": .29, "LB": .32, "RB": .32, "LWB": .32, "RWB": .32,
+           "LDM": .49, "DM": .49, "RDM": .49, "LCM": .60, "CM": .60, "RCM": .60, "LM": .60, "RM": .60,
+           "AM": .72, "LW": .79, "RW": .79, "SS": .85, "CF": .91}
 
 
 def _role_depth(role: str) -> int:
@@ -219,11 +226,17 @@ def lineup_slots(sheet: TeamSheet, positions: dict[str, tuple[float, float]] | N
         xs = [(i + 1) / (n + 1) for i in range(n)]
         if impect_lines:
             sides = [roles[p.player_id][1] for p in group]
-            if len(set(sides)) == n:                     # distinct sides: place by side, not evenly
-                xs = [_SIDE_X[sd] for sd in sides]
+            # Distinct sides: Impect's fixed lanes; otherwise spread evenly over its width.
+            xs = [_SIDE_X[sd] for sd in sides] if len(set(sides)) == n else \
+                [.125 + .75 * (i + 1) / (n + 1) for i in range(n)]
         for i, p in enumerate(group):
             role = roles[p.player_id][0] if roles and p.player_id in roles else labels[r - 1][i]
-            slots.append({"player": p, "row": r, "x": xs[i], "role": role, "rows": len(rows) + 1})
+            slot = {"player": p, "row": r, "x": xs[i], "role": role, "rows": len(rows) + 1}
+            if impect_lines:
+                slot["pitch"] = (xs[i], _ROLE_Y.get(role, .6))   # Impect's own placement on the pitch
+            slots.append(slot)
+    if impect_lines:
+        slots[0]["pitch"] = (.5, _ROLE_Y["GK"])
     return slots
 
 
@@ -541,7 +554,7 @@ def lineup_chart(slots: list[dict[str, Any]], is_charlton: bool, match_end: floa
     rooms: dict[int, list[float]] = {}
     for row, members in rows.items():
         members.sort(key=lambda m: m["x"])
-        xs = [6 + m["x"] * 56 if row else 34 for m in members]
+        xs = [m["pitch"][0] * 68 if "pitch" in m else (6 + m["x"] * 56 if row else 34) for m in members]
         # Each name may use the space up to halfway to its neighbours, less a gap.
         rooms[row] = [min([56.0] + [abs(xs[i] - xs[j]) for j in (i - 1, i + 1) if 0 <= j < len(xs)]) - 1.2
                       for i in range(len(xs))]
@@ -556,8 +569,9 @@ def lineup_chart(slots: list[dict[str, Any]], is_charlton: bool, match_end: floa
             size = min(size, max(5.4, 7.8 * room / extent(t)[0]))
     for t in (t for ts in names.values() for t in ts):
         t.set_fontsize(size)
+    labels: list[tuple[list[Any], tuple[float, float]]] = []
+    discs: list[tuple[float, float]] = []
     for row, members in rows.items():
-        y = 9 + row * (84 / max(n_rows - 1, 1))
         texts = names[row]
         # Still too wide at the smallest type: drop every other name a line so
         # neighbours never print over each other.
@@ -565,14 +579,34 @@ def lineup_chart(slots: list[dict[str, Any]], is_charlton: bool, match_end: floa
                     > texts[i + 1].get_position()[0] - texts[i].get_position()[0] for i in range(len(texts) - 1))
         for i, (m, t) in enumerate(zip(members, texts)):
             player, x = m["player"], t.get_position()[0]
+            y = m["pitch"][1] * 105 if "pitch" in m else 9 + row * (84 / max(n_rows - 1, 1))
             ax.scatter([x], [y], s=430, c=colour, edgecolors=palette.PAPER, linewidths=1.6, zorder=3)
             ax.text(x, y, "" if player.shirt is None else str(player.shirt), ha="center", va="center",
                     fontsize=10.5, fontweight="bold", color="white", zorder=4)
             top = y - 6.0 - (extent(t)[1] + .4 if clash and i % 2 else 0.0)
             t.set_y(top)
+            label = [t]
             if player.off_min is not None:
-                ax.text(x, top - extent(t)[1] - .6, f"▼ {int(player.off_min)}'", ha="center", va="top",
-                        fontsize=min(6.6, size), color=palette.MUTED, zorder=4)
+                label.append(ax.text(x, top - extent(t)[1] - .6, f"▼ {int(player.off_min)}'", ha="center",
+                                     va="top", fontsize=min(6.6, size), color=palette.MUTED, zorder=4))
+            labels.append((label, (x, y)))
+            discs.append((x, y))
+    # A name block that lands on another player's disc (a holding midfielder
+    # just below a central pair, on Impect's spacing) slides sideways clear of it.
+    r = 5.6                                                            # disc radius plus its rim, in pitch units
+    for label, own in labels:
+        for dx, dy in discs:
+            if (dx, dy) == own:
+                continue
+            x0 = min(t.get_position()[0] - extent(t)[0] / 2 for t in label)
+            x1 = max(t.get_position()[0] + extent(t)[0] / 2 for t in label)
+            y_top = label[0].get_position()[1]
+            y_bottom = min(t.get_position()[1] - extent(t)[1] for t in label)
+            if y_bottom > dy + r or y_top < dy - r or x1 < dx - r or x0 > dx + r:
+                continue
+            shift = (dx + r - x0 + .4) if (x0 + x1) / 2 >= dx else -(x1 - (dx - r) + .4)
+            for t in label:
+                t.set_x(t.get_position()[0] + shift)
     return _png_uri(fig, tight=False)
 
 

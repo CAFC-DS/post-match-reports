@@ -280,6 +280,10 @@ def test_impect_roles_use_the_starting_tag_not_the_whole_match_majority():
     assert by_row == {1: ["LB", "LCB", "RCB", "RB"], 2: ["LDM", "RDM"], 3: ["LW", "RW"], 4: ["CF", "CF"]}
     wide = {s["role"]: s["x"] for s in slots if s["row"] == 3}
     assert wide["LW"] < .2 and wide["RW"] > .8                  # wingers on the touchlines, not bunched
+    # Impect's heights: wingers just behind the strikers, full-backs a touch ahead of the centre-backs.
+    y = {s["role"]: s["pitch"][1] for s in slots}
+    assert y["LB"] > y["LCB"] and y["LDM"] < y["LW"] < y["CF"] and y["CF"] - y["LW"] < y["LW"] - y["LDM"]
+    assert slots[0]["pitch"] == (.5, .11)
 
 
 def test_impect_match_info_is_parsed_to_kick_off_formation_and_starting_positions():
