@@ -23,6 +23,7 @@ from src.report.expanded.charts import (
     _infer_pass_receivers, _local_passing_network_map, _match_timeline, _performance_wheel, _player_threat_ranking,
     _second_ball_kpis, _starters_only_network, _threat_density_maps, _xg_race,
 )
+from src.report import metrics_combined
 from src.report.expanded import gamestate as gamestate_mod
 from src.report.expanded import summary as summary_mod
 from src.report.expanded import outofpossession as outofpossession_mod
@@ -85,10 +86,13 @@ def _shade(value: float, baseline: float, higher_is_better: bool) -> str | None:
     return "good" if better else "bad"
 
 
-def _stat_rows_expanded(stats: pd.DataFrame, baseline_row: pd.Series, home: str, away: str, charlton: str) -> list[dict[str, Any]]:
+def _stat_rows_expanded(stats: pd.DataFrame, baseline_row: pd.Series, home: str, away: str, charlton: str,
+                        possession_tracked: bool = False) -> list[dict[str, Any]]:
     rows = []
     last_group = None
     for group, key, label, baseline_key, higher_is_better in STAT_ROWS_EXPANDED:
+        if key == "possession_pct" and possession_tracked:
+            label, baseline_key = "Possession (tracked)", None
         h, a = float(stats.loc[home, key]), float(stats.loc[away, key])
         total = h + a
         home_share = round(h / total * 100, 1) if total else 50.0
@@ -143,12 +147,21 @@ def build_context(impect_match_id: int, dvms_match_id: str | None = None) -> dic
     second_balls={team:_second_ball_kpis(events,team,baseline) for team in teams}
 
     home,away=context["meta"]["home_team"],context["meta"]["away_team"]
-    team_stats=metrics.team_stats(events,home,away)
+    # Possession comes from DVMS tracking (share of in-play time on the ball) whenever the match is tracked,
+    # exactly as on the one-page report; every other stat stays on Impect. The 25/26 baseline is pass share,
+    # so a tracked match value is shown without a baseline rather than set against a different measure.
+    try:
+        team_stats=metrics_combined.combined_team_stats(events,dvms_match)
+        possession_tracked=dvms_match is not None
+    except Exception as error:   # same fallback as the one-page report: pass share from Impect
+        print(f"warning: tracked possession unavailable, using pass share ({type(error).__name__}: {error})")
+        team_stats=metrics.team_stats(events,home,away)
+        possession_tracked=False
     chances=metrics.chance_sources(events,home,away)
     chance_source_img,chance_source_kpis=_chance_source_stacked(chances,subject,opponent)
     player_threat_ranking_img,player_threat_ranking_totals=_player_threat_ranking(events,subject,opponent)
     baseline_row=baseline.mean(numeric_only=True)
-    stat_rows_expanded=_stat_rows_expanded(team_stats,baseline_row,home,away,subject)
+    stat_rows_expanded=_stat_rows_expanded(team_stats,baseline_row,home,away,subject,possession_tracked)
     # Reuse season_baseline's own per-match metric builder wholesale so the
     # match-day wheel values and the season distribution they're ranked
     # against share one definition (a prior version rebuilt a subset by hand
@@ -192,7 +205,8 @@ def build_context(impect_match_id: int, dvms_match_id: str | None = None) -> dic
         print(f"warning: player tables skipped ({type(error).__name__}: {error})")
     has_players=bool(players_ctx.get("player_pages"))
     summary_ctx=summary_mod.summary_context(events,team_stats,charlton_match_values,baseline,_PERFORMANCE_WHEEL_METRICS,
-                                            gamestate_ctx["gamestate_data"],players_ctx.get("player_pages"),subject,opponent)
+                                            gamestate_ctx["gamestate_data"],players_ctx.get("player_pages"),subject,opponent,
+                                            possession_tracked=possession_tracked)
     page_plan=build_page_plan(tracked,has_sheet,has_players)
     context.update({
         "generated_date":dt.date.today().strftime("%d %B %Y"),

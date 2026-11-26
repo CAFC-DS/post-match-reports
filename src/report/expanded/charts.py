@@ -43,7 +43,8 @@ _PERFORMANCE_WHEEL_METRICS: list[tuple[str, str, str, bool]] = [
     ("attack", "shots", "Shots", True),
     ("attack", "packing_xt", "Packing xT", True),
     ("attack", "set_piece_xg", "Set-piece xG for", True),
-    ("possession", "possession_pct", "Possession %", True),
+    # Pass share, not tracked possession: the 25/26 baseline it is ranked against is Impect-only.
+    ("possession", "possession_pct", "Pass share %", True),
     ("possession", "pass_accuracy_pct", "Pass accuracy %", True),
     ("possession", "progressive_actions", "Progressive actions", True),
     ("possession", "passes_into_final_third", "Passes into final third", True),

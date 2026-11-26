@@ -86,3 +86,10 @@ def test_standouts_rank_players_by_share_of_better_than_both_averages():
     assert [p["name"] for p in out] == ["Campbell", "Alli"]
     assert out[0]["ups"] == 2 and out[0]["rated"] == 3 and out[0]["best"] == ["Goals 1", "Shots 1"]
     assert sm.standouts([]) == []
+
+
+def test_how_it_went_describes_tracked_possession_as_time_on_the_ball():
+    gs = {"states": [], "first_goal": None, "other": [], "periods": []}
+    assert "Charlton Athletic made 41% of the passes." in sm.how_it_went(gs, _stats(), CHA, OPP)
+    assert ("Charlton Athletic had the ball for 41% of the time it was in play."
+            in sm.how_it_went(gs, _stats(), CHA, OPP, possession_tracked=True))
