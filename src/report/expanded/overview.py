@@ -159,6 +159,15 @@ def role_labels(rows: list[int]) -> list[list[str]]:
     return labels
 
 
+_ROLE_DEPTH = {"LB": 0, "RB": 0, "LWB": 0, "RWB": 0, "LCB": 0, "CB": 0, "RCB": 0,
+               "LDM": 1, "DM": 1, "RDM": 1, "LCM": 2, "CM": 2, "RCM": 2,
+               "LM": 2, "RM": 2, "LW": 3, "RW": 3, "AM": 3, "SS": 4, "CF": 5}
+
+
+def _role_depth(role: str) -> int:
+    return _ROLE_DEPTH.get(role, 2)
+
+
 def lineup_slots(sheet: TeamSheet, positions: dict[str, tuple[float, float]] | None,
                  roles: dict[str, tuple[str, int]] | None = None) -> list[dict[str, Any]]:
     """Place the starters on a formation grid.
@@ -183,7 +192,12 @@ def lineup_slots(sheet: TeamSheet, positions: dict[str, tuple[float, float]] | N
     # Class first (F7 is reliable about defender vs midfielder vs striker), then
     # depth inside a class: depth alone mixes full-backs with holding midfielders.
     class_rank = {"Defender": 0, "Midfielder": 1, "Striker": 2, "Forward": 2}
-    ordered = sorted(outfield, key=lambda p: (class_rank.get(p.pos_class, 1), have[p.player_id][0]))
+    if roles and all(p.player_id in roles for p in outfield):
+        # Impect's starting tags give the line directly; tracking depth is a
+        # whole-match average and drifts with any change of system.
+        ordered = sorted(outfield, key=lambda p: (_role_depth(roles[p.player_id][0]), have[p.player_id][0]))
+    else:
+        ordered = sorted(outfield, key=lambda p: (class_rank.get(p.pos_class, 1), have[p.player_id][0]))
     labels = role_labels(rows)
     slots = [{"player": keeper[0], "row": 0, "x": 0.0, "role": "GK", "rows": len(rows) + 1}]
     cursor = 0
@@ -367,18 +381,29 @@ def impect_role(position: str | None, side: str | None) -> str | None:
 
 def impect_roles(events: pd.DataFrame | None, sheet: TeamSheet) -> dict[str, tuple[str, int]] | None:
     """F7 player id -> (role label, left-to-right rank) from Impect's own
-    position tags (the most frequent tag across the player's events)."""
+    position tags.
+
+    The lineup shows the *starting* shape, so each player takes the tag on
+    their first event of the match: Impect re-tags every event after a
+    substitution or a change of system, and a whole-match majority would put
+    a winger moved to centre-back at half-time (Reach, Lincoln away at
+    Charlton, 4-4-2 to 5-2-1-2) in the back line.
+    """
     squad = _impect_squad(events, sheet)
     if squad is None or "playerPosition" not in squad.columns:
         return None
     squad = squad[squad["playerPosition"].notna()]
+    order = [c for c in ("periodId", "gameTimeInSec", "eventNumber") if c in squad.columns]
+    if order:
+        squad = squad.sort_values(order, kind="stable")
     names = _impect_names(squad, sheet)
     out: dict[str, tuple[str, int]] = {}
     for pid, name in names.items():
         rows = squad[squad["playerName"] == name]
         if rows.empty:
             continue
-        pair = rows.groupby(["playerPosition", "playerPositionSide"], dropna=False).size().idxmax()
+        first = rows.iloc[0]
+        pair = (first["playerPosition"], first.get("playerPositionSide"))
         role = impect_role(pair[0], pair[1])
         if role is not None:
             out[pid] = (role, _SIDE_RANK.get(pair[1] if isinstance(pair[1], str) else "CENTRE", 2))

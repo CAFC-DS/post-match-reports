@@ -239,3 +239,41 @@ def test_timeline_row_labels_never_overlap_each_other_or_a_marker():
     assert all(not (s < k < e) for s, e in spans for k in markers)
     assert all(e <= 98.0 for _, e in spans) and all(s >= 0 for s, _ in spans)
     assert any(t[0].text.endswith("…") for _, t in items[2:])      # the late crush is shortened, not overprinted
+
+
+def test_impect_roles_use_the_starting_tag_not_the_whole_match_majority():
+    """Lincoln at Charlton: 4-4-2 (flat) with Reach at right wing, then 5-2-1-2 at
+    half-time with Reach at left centre-back. He has more events at LCB than at RW,
+    but the lineup shows the starting shape."""
+    sheets, _ = ov.build_team_sheets(_f7(), _f24([]))
+    home = sheets["home"]
+    tags = {   # player -> (first-half tag, second-half tag)
+        "Def1": (("LEFT_WINGBACK_DEFENDER", "LEFT"),) * 2,
+        "Def2": (("CENTRAL_DEFENDER", "CENTRE_LEFT"),) * 2,
+        "Def3": (("CENTRAL_DEFENDER", "CENTRE_RIGHT"),) * 2,
+        "Def4": (("RIGHT_WINGBACK_DEFENDER", "RIGHT"),) * 2,
+        "Mid1": (("LEFT_WINGER", "LEFT"), ("ATTACKING_MIDFIELD", "CENTRE")),
+        "Mid2": (("DEFENSE_MIDFIELD", "CENTRE_LEFT"),) * 2,
+        "Mid3": (("DEFENSE_MIDFIELD", "CENTRE_RIGHT"),) * 2,
+        "Mid4": (("RIGHT_WINGER", "RIGHT"), ("CENTRAL_DEFENDER", "CENTRE_LEFT")),
+        "Str1": (("CENTER_FORWARD", "CENTRE_LEFT"),) * 2,
+        "Str2": (("CENTER_FORWARD", "CENTRE_RIGHT"),) * 2,
+    }
+    rows, n = [], 0
+    for name, (first, second) in tags.items():
+        for period, (pos, side), count in ((1, first, 2), (2, second, 5)):   # more second-half events
+            for k in range(count):
+                n += 1
+                rows.append(dict(squadName="Home FC", playerName=name, periodId=period,
+                                 gameTimeInSec=(0 if period == 1 else 10000) + 60 * k, eventNumber=n,
+                                 playerPosition=pos, playerPositionSide=side,
+                                 startAdjCoordinatesX=0.0, startAdjCoordinatesY=0.0))
+    events = pd.DataFrame(rows).sample(frac=1.0, random_state=0)   # order must come from the clock
+    roles = ov.impect_roles(events, home)
+    assert roles["hm4"][0] == "RW" and roles["hm1"][0] == "LW"
+    # Whole-match tracking would put the right winger deep; the starting tags win.
+    pos = _positions(home)
+    pos["hm4"] = (-25.0, 10.0)
+    slots = ov.lineup_slots(home, pos, roles)
+    by_row = {r: [s["role"] for s in slots if s["row"] == r] for r in (1, 2, 3)}
+    assert by_row == {1: ["LB", "LCB", "RCB", "RB"], 2: ["LW", "LDM", "RDM", "RW"], 3: ["CF", "CF"]}
