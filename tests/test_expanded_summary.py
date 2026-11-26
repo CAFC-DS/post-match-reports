@@ -97,3 +97,10 @@ def test_a_half_time_first_change_is_not_repeated_after_the_half_split():
     lines = sm.how_it_went(gs, _stats(), CHA, OPP)
     assert any(l.startswith("By half") for l in lines)
     assert not any("first change" in l for l in lines)
+
+
+def test_how_it_went_describes_tracked_possession_as_time_on_the_ball():
+    gs = {"states": [], "first_goal": None, "other": [], "periods": []}
+    assert "Charlton Athletic made 41% of the passes." in sm.how_it_went(gs, _stats(), CHA, OPP)
+    assert ("Charlton Athletic had the ball for 41% of the time it was in play."
+            in sm.how_it_went(gs, _stats(), CHA, OPP, possession_tracked=True))

@@ -61,7 +61,8 @@ def key_numbers(stats: pd.DataFrame, subject: str, opponent: str) -> list[dict[s
     return [{"label": label, "subject": fn(subject), "opponent": fn(opponent)} for label, fn in rows]
 
 
-def how_it_went(gs: dict[str, Any], stats: pd.DataFrame, subject: str, opponent: str) -> list[str]:
+def how_it_went(gs: dict[str, Any], stats: pd.DataFrame, subject: str, opponent: str,
+                possession_tracked: bool = False) -> list[str]:
     """Sentences about the shape of the game: score states, first goal, chances, the sharpest spell."""
     lines = []
     minutes = {s["key"]: s["minutes"] for s in gs["states"]}
@@ -81,7 +82,10 @@ def how_it_went(gs: dict[str, Any], stats: pd.DataFrame, subject: str, opponent:
     best = max(((p["xg"][i], p["label"], (subject, opponent)[i]) for p in periods for i in (0, 1)), default=None)
     if best and best[0] > 0:
         lines.append(f"The most dangerous spell was {best[1]}, when {best[2]} created {best[0]:.2f} xG.")
-    lines.append(f"{subject} made {stats.loc[subject, 'possession_pct']:.0f}% of the passes.")
+    if possession_tracked:
+        lines.append(f"{subject} had the ball for {stats.loc[subject, 'possession_pct']:.0f}% of the time it was in play.")
+    else:
+        lines.append(f"{subject} made {stats.loc[subject, 'possession_pct']:.0f}% of the passes.")
     halves = {r["label"]: r for r in gs.get("other", [])}
     if "First half" in halves and "Second half" in halves:
         a, b = halves["First half"], halves["Second half"]
@@ -135,10 +139,11 @@ def standouts(player_pages: list[dict[str, Any]], n: int = 3) -> list[dict[str, 
 
 def summary_context(events: pd.DataFrame, stats: pd.DataFrame, match_values: dict[str, float], baseline: pd.DataFrame,
                     wheel_metrics: list[tuple[str, str, str, bool]], gs: dict[str, Any],
-                    player_pages: list[dict[str, Any]] | None, subject: str, opponent: str) -> dict[str, Any]:
+                    player_pages: list[dict[str, Any]] | None, subject: str, opponent: str,
+                    possession_tracked: bool = False) -> dict[str, Any]:
     return {"summary": {
         **score_and_scorers(events, subject, opponent),
-        "went": how_it_went(gs, stats, subject, opponent),
+        "went": how_it_went(gs, stats, subject, opponent, possession_tracked),
         "numbers": key_numbers(stats, subject, opponent),
         "season": against_the_season(match_values, baseline, wheel_metrics, subject),
         "standouts": standouts(player_pages or []),
