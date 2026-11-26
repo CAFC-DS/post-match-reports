@@ -230,7 +230,8 @@ def lineup_slots(sheet: TeamSheet, positions: dict[str, tuple[float, float]] | N
 def build_team_sheets(f7, f24_events: pd.DataFrame,
                       avg_positions: dict[str, pd.DataFrame] | None = None,
                       to_adj=None,
-                      impect_events: pd.DataFrame | None = None) -> tuple[dict[str, TeamSheet], float]:
+                      impect_events: pd.DataFrame | None = None,
+                      impect_info: dict | None = None) -> tuple[dict[str, TeamSheet], float]:
     """``({"home": sheet, "away": sheet}, match_end_minute)``.
 
     ``avg_positions`` is ``DvmsMatch.avg_positions`` (per-side frames with
@@ -284,7 +285,8 @@ def build_team_sheets(f7, f24_events: pd.DataFrame,
         sheet = TeamSheet(team_id=meta.team_id, side=side, name=meta.name,
                           formation=meta.formation, players=list(players.values()))
         positions = _positions_for(avg_positions, side, to_adj, sheet) or impect_positions(impect_events, sheet)
-        _assign_roles(sheet, positions, impect_roles(impect_events, sheet))
+        _assign_roles(sheet, positions,
+                      impect_roles(impect_events, sheet, impect_team_info(impect_info, impect_events, sheet)))
         sheets[side] = sheet
     return sheets, match_end
 
@@ -391,31 +393,49 @@ def impect_role(position: str | None, side: str | None) -> str | None:
     return label
 
 
-def impect_roles(events: pd.DataFrame | None, sheet: TeamSheet) -> dict[str, tuple[str, int]] | None:
-    """F7 player id -> (role label, left-to-right rank) from Impect's own
-    position tags.
+def impect_team_info(info: dict | None, events: pd.DataFrame | None, sheet: TeamSheet) -> dict | None:
+    """This team's entry from ``impect_cafcdb_source.load_match_info`` (keyed by
+    Impect squad id, found through the events' squad name), or None."""
+    squad = _impect_squad(events, sheet)
+    if not info or squad is None or "squadId" not in squad.columns:
+        return None
+    ids = squad["squadId"].dropna()
+    return info.get(int(ids.iloc[0])) if not ids.empty else None
 
-    The lineup shows the *starting* shape, so each player takes the tag on
-    their first event of the match: Impect re-tags every event after a
-    substitution or a change of system, and a whole-match majority would put
-    a winger moved to centre-back at half-time (Reach, Lincoln away at
-    Charlton, 4-4-2 to 5-2-1-2) in the back line.
+
+def impect_roles(events: pd.DataFrame | None, sheet: TeamSheet,
+                 team_info: dict | None = None) -> dict[str, tuple[str, int]] | None:
+    """F7 player id -> (role label, left-to-right rank) from Impect's own
+    position tags, for the *starting* shape.
+
+    Impect's team sheet (``team_info["starting"]``, from MATCH_INFO) is used
+    when present. Otherwise each player takes the tag on their first event of
+    the match: Impect re-tags every event after a substitution or change of
+    system, so a whole-match majority would put a winger moved to centre-back
+    at half-time (Reach, Lincoln away at Charlton, 4-4-2 to 5-2-1-2) in the
+    back line.
     """
     squad = _impect_squad(events, sheet)
-    if squad is None or "playerPosition" not in squad.columns:
+    if squad is None:
         return None
-    squad = squad[squad["playerPosition"].notna()]
-    order = [c for c in ("periodId", "gameTimeInSec", "eventNumber") if c in squad.columns]
+    starting = (team_info or {}).get("starting") or {}
+    if not starting and "playerPosition" not in squad.columns:
+        return None
+    tagged = squad[squad["playerPosition"].notna()] if "playerPosition" in squad.columns else squad.iloc[0:0]
+    order = [c for c in ("periodId", "gameTimeInSec", "eventNumber") if c in tagged.columns]
     if order:
-        squad = squad.sort_values(order, kind="stable")
+        tagged = tagged.sort_values(order, kind="stable")
     names = _impect_names(squad, sheet)
     out: dict[str, tuple[str, int]] = {}
     for pid, name in names.items():
         rows = squad[squad["playerName"] == name]
-        if rows.empty:
-            continue
-        first = rows.iloc[0]
-        pair = (first["playerPosition"], first.get("playerPositionSide"))
+        ids = [int(i) for i in rows["playerId"].dropna().unique()] if "playerId" in rows.columns else []
+        pair = next((starting[i] for i in ids if i in starting), None)
+        if pair is None:
+            first = tagged[tagged["playerName"] == name]
+            if first.empty:
+                continue
+            pair = (first.iloc[0]["playerPosition"], first.iloc[0].get("playerPositionSide"))
         role = impect_role(pair[0], pair[1])
         if role is not None:
             out[pid] = (role, _SIDE_RANK.get(pair[1] if isinstance(pair[1], str) else "CENTRE", 2))
@@ -790,20 +810,25 @@ def half_time_score(f7, f24_events: pd.DataFrame) -> dict[str, int]:
 
 
 def overview_context(f7, f24_events: pd.DataFrame, avg_positions, to_adj, impect_events: pd.DataFrame,
-                     subject: str) -> dict[str, Any]:
+                     subject: str, impect_info: dict | None = None) -> dict[str, Any]:
     """Everything the overview page needs: per-team sheet rows, lineup images
-    and the timeline image. Teams are ordered subject first."""
-    sheets, match_end = build_team_sheets(f7, f24_events, avg_positions, to_adj, impect_events)
+    and the timeline image. Teams are ordered subject first.
+
+    ``impect_info`` is ``impect_cafcdb_source.load_match_info``: Impect's
+    starting positions and kick-off formation, which the lineup and its
+    formation label follow when present (Opta's F7 formation otherwise)."""
+    sheets, match_end = build_team_sheets(f7, f24_events, avg_positions, to_adj, impect_events, impect_info)
     ordered = sorted(sheets.values(), key=lambda sh: sh.name.lower() != subject.lower())
     cards = []
     for sheet in ordered:
         is_subject = sheet.name.lower() == subject.lower()
+        team_info = impect_team_info(impect_info, impect_events, sheet)
         slots = lineup_slots(sheet, _positions_for(avg_positions, sheet.side, to_adj, sheet)
-                             or impect_positions(impect_events, sheet), impect_roles(impect_events, sheet))
+                             or impect_positions(impect_events, sheet), impect_roles(impect_events, sheet, team_info))
         used = [p for p in sheet.substitutes if p.played]
         cards.append({
             "name": sheet.name, "is_charlton": is_subject,
-            "formation": _formation_label(sheet.formation),
+            "formation": (team_info or {}).get("formation") or _formation_label(sheet.formation),
             "lineup_img": lineup_chart(slots, is_subject, match_end) if slots else "",
             "starters": _sheet_rows(sheet.starters, match_end),
             "subs": _sheet_rows(used, match_end),

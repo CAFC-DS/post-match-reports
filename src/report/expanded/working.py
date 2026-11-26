@@ -117,6 +117,16 @@ def _stat_rows_expanded(stats: pd.DataFrame, baseline_row: pd.Series, home: str,
     return rows
 
 
+def _impect_match_info(impect_match_id: int) -> dict:
+    """Impect's starting positions and formations; an empty dict (the lineup
+    then falls back to event tags and Opta's formation) if the lookup fails."""
+    try:
+        return impect_cafcdb_source.load_match_info(impect_match_id)
+    except Exception as exc:  # noqa: BLE001 - the overview must still render
+        print(f"warning: Impect match info unavailable ({exc}); lineup uses event tags")
+        return {}
+
+
 def build_context(impect_match_id: int, dvms_match_id: str | None = None) -> dict[str, Any]:
     context=build_shared_context(impect_match_id,dvms_match_id)
     dvms_match=None
@@ -166,7 +176,8 @@ def build_context(impect_match_id: int, dvms_match_id: str | None = None) -> dic
         from src.report import metrics_dvms
         overview_ctx=overview_mod.overview_context(
             dvms_match.f7,dvms_match.f24.events,dvms_match.avg_positions,
-            lambda x,y:metrics_dvms._metres_to_adj(x,y,dvms_match.meta),events,subject)
+            lambda x,y:metrics_dvms._metres_to_adj(x,y,dvms_match.meta),events,subject,
+            _impect_match_info(impect_match_id))
     has_sheet=bool(overview_ctx)
     first_sub=min([e["minute"] for _,_,evs in overview_ctx.get("timeline_by_team",[]) for e in evs if e["kind"]=="sub"],
                   default=None)

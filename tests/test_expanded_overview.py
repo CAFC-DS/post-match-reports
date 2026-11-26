@@ -280,3 +280,35 @@ def test_impect_roles_use_the_starting_tag_not_the_whole_match_majority():
     assert by_row == {1: ["LB", "LCB", "RCB", "RB"], 2: ["LDM", "RDM"], 3: ["LW", "RW"], 4: ["CF", "CF"]}
     wide = {s["role"]: s["x"] for s in slots if s["row"] == 3}
     assert wide["LW"] < .2 and wide["RW"] > .8                  # wingers on the touchlines, not bunched
+
+
+def test_impect_match_info_is_parsed_to_kick_off_formation_and_starting_positions():
+    from src.report.impect_cafcdb_source import parse_match_info
+    import json
+    row = {"home_squad_id": 10, "away_squad_id": 20,
+           "home_starting": json.dumps([{"playerId": 1, "position": "RIGHT_WINGER", "positionSide": "RIGHT"}]),
+           "away_starting": None,
+           "home_formations": json.dumps([{"formation": "5-2-1-2", "gameTimeInSec": 10000},
+                                          {"formation": "4-4-2 (flat)", "gameTimeInSec": 0}]),
+           "away_formations": "not json"}
+    info = parse_match_info(row)
+    assert info[10] == {"formation": "4-4-2 (flat)", "starting": {1: ("RIGHT_WINGER", "RIGHT")}}
+    assert info[20] == {"formation": "", "starting": {}}
+    assert parse_match_info(None) == {}
+
+
+def test_impects_team_sheet_beats_event_tags_for_the_starting_role():
+    sheets, _ = ov.build_team_sheets(_f7(), _f24([]))
+    home = sheets["home"]
+    events = pd.DataFrame({"squadName": ["Home FC"] * 2, "squadId": [10, 10], "playerId": [7, 8],
+                           "playerName": ["Mid4", "Mid1"], "periodId": [1, 1], "gameTimeInSec": [5, 6],
+                           "eventNumber": [1, 2],
+                           "playerPosition": ["CENTRAL_DEFENDER", "LEFT_WINGER"],
+                           "playerPositionSide": ["CENTRE_LEFT", "LEFT"]})
+    info = {10: {"formation": "4-4-2 (flat)", "starting": {7: ("RIGHT_WINGER", "RIGHT")}}}
+    team = ov.impect_team_info(info, events, home)
+    assert team["formation"] == "4-4-2 (flat)"
+    roles = ov.impect_roles(events, home, team)
+    assert roles["hm4"] == ("RW", 4)          # from Impect's team sheet, not the first event
+    assert roles["hm1"] == ("LW", 0)          # not on the sheet: first event's tag
+    assert ov.impect_team_info(None, events, home) is None

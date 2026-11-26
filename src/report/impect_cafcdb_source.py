@@ -205,6 +205,64 @@ def load_match_events(match_id: int, env_path: str = ".env") -> pd.DataFrame:
     return df
 
 
+# Impect's own team sheet: the starting position of every starter and the
+# formations each side used (with the game time each began), one row per
+# match (latest load kept if the extractor ran twice).
+_MATCH_INFO_SQL = """
+select
+    i.HOME_SQUAD_ID as "home_squad_id",
+    i.AWAY_SQUAD_ID as "away_squad_id",
+    i.HOME_STARTING_POSITIONS::string as "home_starting",
+    i.AWAY_STARTING_POSITIONS::string as "away_starting",
+    i.HOME_FORMATIONS::string as "home_formations",
+    i.AWAY_FORMATIONS::string as "away_formations"
+from CAFC_DB.IMPECT_RAW.MATCH_INFO i
+where i.MATCH_ID = %(match_id)s
+qualify row_number() over (order by i.LOADED_AT desc) = 1
+"""
+
+
+def parse_match_info(row: dict | None) -> dict[int, dict]:
+    """``{squad_id: {"formation": "4-4-2 (flat)", "starting": {player_id: (position, side)}}}``.
+
+    ``formation`` is the shape at kick-off (the entry at game time 0, else the
+    earliest). Missing or malformed columns give an empty entry, never an error.
+    """
+    def load(text):
+        try:
+            return json.loads(text) if isinstance(text, str) and text else []
+        except ValueError:
+            return []
+
+    out: dict[int, dict] = {}
+    for side in ("home", "away"):
+        squad_id = (row or {}).get(f"{side}_squad_id")
+        if squad_id is None:
+            continue
+        formations = sorted((f for f in load(row.get(f"{side}_formations")) if isinstance(f, dict)),
+                            key=lambda f: float(f.get("gameTimeInSec") or 0))
+        starting = {int(p["playerId"]): (p.get("position"), p.get("positionSide"))
+                    for p in load(row.get(f"{side}_starting"))
+                    if isinstance(p, dict) and p.get("playerId") is not None}
+        out[int(squad_id)] = {"formation": str(formations[0].get("formation") or "") if formations else "",
+                              "starting": starting}
+    return out
+
+
+def load_match_info(match_id: int, env_path: str = ".env") -> dict[int, dict]:
+    """Impect's starting positions and kick-off formation per squad id
+    (see ``parse_match_info``); ``{}`` when the match has no MATCH_INFO row."""
+    connector = SnowflakeConnector(env_path)
+    with connector.connection() as conn:
+        cur = conn.cursor()
+        cur.execute(f"USE ROLE {DEV_ROLE}")
+        cur.execute(f"USE WAREHOUSE {DEV_WAREHOUSE}")
+        cur.execute(_MATCH_INFO_SQL, {"match_id": match_id})
+        cols = [d[0] for d in cur.description]
+        rows = cur.fetchall()
+    return parse_match_info(dict(zip(cols, rows[0])) if rows else None)
+
+
 _DUEL_KPI_FIELDS = ["WON_AERIAL_DUELS", "WON_GROUND_DUELS", "LOST_AERIAL_DUELS", "LOST_GROUND_DUELS"]
 
 
