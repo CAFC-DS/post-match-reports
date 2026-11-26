@@ -275,5 +275,8 @@ def test_impect_roles_use_the_starting_tag_not_the_whole_match_majority():
     pos = _positions(home)
     pos["hm4"] = (-25.0, 10.0)
     slots = ov.lineup_slots(home, pos, roles)
-    by_row = {r: [s["role"] for s in slots if s["row"] == r] for r in (1, 2, 3)}
-    assert by_row == {1: ["LB", "LCB", "RCB", "RB"], 2: ["LW", "LDM", "RDM", "RW"], 3: ["CF", "CF"]}
+    by_row = {r: [s["role"] for s in slots if s["row"] == r] for r in (1, 2, 3, 4)}
+    # Impect draws a 4-4-2 (flat) with the wingers ahead of the two holding midfielders.
+    assert by_row == {1: ["LB", "LCB", "RCB", "RB"], 2: ["LDM", "RDM"], 3: ["LW", "RW"], 4: ["CF", "CF"]}
+    wide = {s["role"]: s["x"] for s in slots if s["row"] == 3}
+    assert wide["LW"] < .2 and wide["RW"] > .8                  # wingers on the touchlines, not bunched

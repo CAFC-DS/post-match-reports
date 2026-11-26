@@ -86,3 +86,14 @@ def test_standouts_rank_players_by_share_of_better_than_both_averages():
     assert [p["name"] for p in out] == ["Campbell", "Alli"]
     assert out[0]["ups"] == 2 and out[0]["rated"] == 3 and out[0]["best"] == ["Goals 1", "Shots 1"]
     assert sm.standouts([]) == []
+
+
+def test_a_half_time_first_change_is_not_repeated_after_the_half_split():
+    halves = [{"label": "First half", "xg_for": 2.2, "xg_against": 0.0, "pressures_per_min": 1.7},
+              {"label": "Second half", "xg_for": 2.81, "xg_against": .24, "pressures_per_min": 1.0}]
+    gs = {"states": [], "first_goal": None, "periods": [],
+          "other": halves + [{"label": "Before the first substitution (45')", "xg_for": 2.2, "xg_against": 0.0},
+                             {"label": "After the first substitution", "xg_for": 2.81, "xg_against": .24}]}
+    lines = sm.how_it_went(gs, _stats(), CHA, OPP)
+    assert any(l.startswith("By half") for l in lines)
+    assert not any("first change" in l for l in lines)

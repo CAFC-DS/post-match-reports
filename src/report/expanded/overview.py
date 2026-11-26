@@ -164,6 +164,9 @@ _ROLE_DEPTH = {"LB": 0, "RB": 0, "LWB": 0, "RWB": 0, "LCB": 0, "CB": 0, "RCB": 0
                "LM": 2, "RM": 2, "LW": 3, "RW": 3, "AM": 3, "SS": 4, "CF": 5}
 
 
+_SIDE_X = {0: .1, 1: .32, 2: .5, 3: .68, 4: .9}   # side rank -> fraction across the pitch, left to right
+
+
 def _role_depth(role: str) -> int:
     return _ROLE_DEPTH.get(role, 2)
 
@@ -183,20 +186,25 @@ def lineup_slots(sheet: TeamSheet, positions: dict[str, tuple[float, float]] | N
     starters = sheet.starters
     keeper = [p for p in starters if p.role == "GK"] or starters[:1]
     outfield = [p for p in starters if p not in keeper]
-    rows = formation_rows(sheet.formation)
-    if rows is None or sum(rows) != len(outfield):
-        return []
     have = positions or {}
     if not all(p.player_id in have for p in outfield):
         return []
-    # Class first (F7 is reliable about defender vs midfielder vs striker), then
-    # depth inside a class: depth alone mixes full-backs with holding midfielders.
-    class_rank = {"Defender": 0, "Midfielder": 1, "Striker": 2, "Forward": 2}
-    if roles and all(p.player_id in roles for p in outfield):
-        # Impect's starting tags give the line directly; tracking depth is a
+    rows = formation_rows(sheet.formation)
+    if (rows is None or sum(rows) != len(outfield)) and not (roles and all(p.player_id in roles for p in outfield)):
+        return []
+    impect_lines = bool(roles) and all(p.player_id in roles for p in outfield)
+    if impect_lines:
+        # Draw Impect's starting shape: one line per depth of tag (a 4-4-2 flat's
+        # wingers sit ahead of its two holding midfielders, as Impect draws it),
+        # each player across the pitch by their side tag. Tracking depth is a
         # whole-match average and drifts with any change of system.
         ordered = sorted(outfield, key=lambda p: (_role_depth(roles[p.player_id][0]), have[p.player_id][0]))
+        depths = [_role_depth(roles[p.player_id][0]) for p in ordered]
+        rows = [depths.count(d) for d in sorted(set(depths))]
     else:
+        # Class first (F7 is reliable about defender vs midfielder vs striker), then
+        # depth inside a class: depth alone mixes full-backs with holding midfielders.
+        class_rank = {"Defender": 0, "Midfielder": 1, "Striker": 2, "Forward": 2}
         ordered = sorted(outfield, key=lambda p: (class_rank.get(p.pos_class, 1), have[p.player_id][0]))
     labels = role_labels(rows)
     slots = [{"player": keeper[0], "row": 0, "x": 0.0, "role": "GK", "rows": len(rows) + 1}]
@@ -208,10 +216,14 @@ def lineup_slots(sheet: TeamSheet, positions: dict[str, tuple[float, float]] | N
         group = sorted(members, key=lambda p: (roles[p.player_id][1], -have[p.player_id][1])
                        if roles and p.player_id in roles else (2, -have[p.player_id][1]))
         cursor += n
+        xs = [(i + 1) / (n + 1) for i in range(n)]
+        if impect_lines:
+            sides = [roles[p.player_id][1] for p in group]
+            if len(set(sides)) == n:                     # distinct sides: place by side, not evenly
+                xs = [_SIDE_X[sd] for sd in sides]
         for i, p in enumerate(group):
-            x = (i + 1) / (n + 1)
             role = roles[p.player_id][0] if roles and p.player_id in roles else labels[r - 1][i]
-            slots.append({"player": p, "row": r, "x": x, "role": role, "rows": len(rows) + 1})
+            slots.append({"player": p, "row": r, "x": xs[i], "role": role, "rows": len(rows) + 1})
     return slots
 
 
@@ -506,29 +518,40 @@ def lineup_chart(slots: list[dict[str, Any]], is_charlton: bool, match_end: floa
         rows.setdefault(s["row"], []).append(s)
     names: dict[int, list[Any]] = {}
     size = 7.8                                                         # one type size for every name
+    rooms: dict[int, list[float]] = {}
     for row, members in rows.items():
-        room = (56 / (len(members) + 1) if len(members) > 1 else 56) - 1.2   # slot width, less a gap
+        members.sort(key=lambda m: m["x"])
+        xs = [6 + m["x"] * 56 if row else 34 for m in members]
+        # Each name may use the space up to halfway to its neighbours, less a gap.
+        rooms[row] = [min([56.0] + [abs(xs[i] - xs[j]) for j in (i - 1, i + 1) if 0 <= j < len(xs)]) - 1.2
+                      for i in range(len(xs))]
         names[row] = []
-        for m in members:
+        for m, x, room in zip(members, xs, rooms[row]):
             name = m["player"].last_name.split()[-1]
-            t = ax.text(6 + m["x"] * 56 if row else 34, 0, name, ha="center", va="top", fontsize=7.8,
+            t = ax.text(x, 0, name, ha="center", va="top", fontsize=7.8,
                         fontweight="bold", color=palette.INK, zorder=4, linespacing=1.0)
             if extent(t)[0] > room:
                 t.set_text(_wrap_name(name))
             names[row].append(t)
-        widest = max(extent(t)[0] for t in names[row])
-        size = min(size, max(5.4, 7.8 * room / widest))
+            size = min(size, max(5.4, 7.8 * room / extent(t)[0]))
+    for t in (t for ts in names.values() for t in ts):
+        t.set_fontsize(size)
     for row, members in rows.items():
         y = 9 + row * (84 / max(n_rows - 1, 1))
-        for m, t in zip(members, names[row]):
+        texts = names[row]
+        # Still too wide at the smallest type: drop every other name a line so
+        # neighbours never print over each other.
+        clash = any(extent(texts[i])[0] / 2 + extent(texts[i + 1])[0] / 2 + .6
+                    > texts[i + 1].get_position()[0] - texts[i].get_position()[0] for i in range(len(texts) - 1))
+        for i, (m, t) in enumerate(zip(members, texts)):
             player, x = m["player"], t.get_position()[0]
             ax.scatter([x], [y], s=430, c=colour, edgecolors=palette.PAPER, linewidths=1.6, zorder=3)
             ax.text(x, y, "" if player.shirt is None else str(player.shirt), ha="center", va="center",
                     fontsize=10.5, fontweight="bold", color="white", zorder=4)
-            t.set_fontsize(size)
-            t.set_y(y - 6.0)
+            top = y - 6.0 - (extent(t)[1] + .4 if clash and i % 2 else 0.0)
+            t.set_y(top)
             if player.off_min is not None:
-                ax.text(x, y - 6.0 - extent(t)[1] - .6, f"▼ {int(player.off_min)}'", ha="center", va="top",
+                ax.text(x, top - extent(t)[1] - .6, f"▼ {int(player.off_min)}'", ha="center", va="top",
                         fontsize=min(6.6, size), color=palette.MUTED, zorder=4)
     return _png_uri(fig, tight=False)
 

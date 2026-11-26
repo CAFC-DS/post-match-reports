@@ -110,10 +110,14 @@ def _hull_area(xs: np.ndarray, ys: np.ndarray) -> float:
         return 0.0
     pts = pts[np.lexsort((pts[:, 1], pts[:, 0]))]
 
+    def cross(o, a, b) -> float:
+        # z of the 2-D cross product; np.cross dropped 2-D vectors in NumPy 2.5.
+        return float((a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]))
+
     def half(points):
         chain = []
         for p in points:
-            while len(chain) >= 2 and np.cross(chain[-1] - chain[-2], p - chain[-2]) <= 0:
+            while len(chain) >= 2 and cross(chain[-2], chain[-1], p) <= 0:
                 chain.pop()
             chain.append(p)
         return chain
