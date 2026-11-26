@@ -159,6 +159,25 @@ def role_labels(rows: list[int]) -> list[list[str]]:
     return labels
 
 
+_ROLE_DEPTH = {"LB": 0, "RB": 0, "LWB": 0, "RWB": 0, "LCB": 0, "CB": 0, "RCB": 0,
+               "LDM": 1, "DM": 1, "RDM": 1, "LCM": 2, "CM": 2, "RCM": 2,
+               "LM": 2, "RM": 2, "LW": 3, "RW": 3, "AM": 3, "SS": 4, "CF": 5}
+
+
+# Where Impect's lineup graphic puts each position, measured off its own pitch
+# drawings (Charlton 4-3-3 and Lincoln 4-4-2 flat, Nov 2026): side rank ->
+# fraction of the pitch width from the left touchline, and role -> fraction of
+# the pitch length from the team's own goal line.
+_SIDE_X = {0: .125, 1: .375, 2: .5, 3: .625, 4: .875}
+_ROLE_Y = {"GK": .11, "LCB": .29, "CB": .29, "RCB": .29, "LB": .32, "RB": .32, "LWB": .32, "RWB": .32,
+           "LDM": .49, "DM": .49, "RDM": .49, "LCM": .60, "CM": .60, "RCM": .60, "LM": .60, "RM": .60,
+           "AM": .72, "LW": .79, "RW": .79, "SS": .85, "CF": .91}
+
+
+def _role_depth(role: str) -> int:
+    return _ROLE_DEPTH.get(role, 2)
+
+
 def lineup_slots(sheet: TeamSheet, positions: dict[str, tuple[float, float]] | None,
                  roles: dict[str, tuple[str, int]] | None = None) -> list[dict[str, Any]]:
     """Place the starters on a formation grid.
@@ -174,16 +193,26 @@ def lineup_slots(sheet: TeamSheet, positions: dict[str, tuple[float, float]] | N
     starters = sheet.starters
     keeper = [p for p in starters if p.role == "GK"] or starters[:1]
     outfield = [p for p in starters if p not in keeper]
-    rows = formation_rows(sheet.formation)
-    if rows is None or sum(rows) != len(outfield):
-        return []
     have = positions or {}
     if not all(p.player_id in have for p in outfield):
         return []
-    # Class first (F7 is reliable about defender vs midfielder vs striker), then
-    # depth inside a class: depth alone mixes full-backs with holding midfielders.
-    class_rank = {"Defender": 0, "Midfielder": 1, "Striker": 2, "Forward": 2}
-    ordered = sorted(outfield, key=lambda p: (class_rank.get(p.pos_class, 1), have[p.player_id][0]))
+    rows = formation_rows(sheet.formation)
+    if (rows is None or sum(rows) != len(outfield)) and not (roles and all(p.player_id in roles for p in outfield)):
+        return []
+    impect_lines = bool(roles) and all(p.player_id in roles for p in outfield)
+    if impect_lines:
+        # Draw Impect's starting shape: one line per depth of tag (a 4-4-2 flat's
+        # wingers sit ahead of its two holding midfielders, as Impect draws it),
+        # each player across the pitch by their side tag. Tracking depth is a
+        # whole-match average and drifts with any change of system.
+        ordered = sorted(outfield, key=lambda p: (_role_depth(roles[p.player_id][0]), have[p.player_id][0]))
+        depths = [_role_depth(roles[p.player_id][0]) for p in ordered]
+        rows = [depths.count(d) for d in sorted(set(depths))]
+    else:
+        # Class first (F7 is reliable about defender vs midfielder vs striker), then
+        # depth inside a class: depth alone mixes full-backs with holding midfielders.
+        class_rank = {"Defender": 0, "Midfielder": 1, "Striker": 2, "Forward": 2}
+        ordered = sorted(outfield, key=lambda p: (class_rank.get(p.pos_class, 1), have[p.player_id][0]))
     labels = role_labels(rows)
     slots = [{"player": keeper[0], "row": 0, "x": 0.0, "role": "GK", "rows": len(rows) + 1}]
     cursor = 0
@@ -194,17 +223,28 @@ def lineup_slots(sheet: TeamSheet, positions: dict[str, tuple[float, float]] | N
         group = sorted(members, key=lambda p: (roles[p.player_id][1], -have[p.player_id][1])
                        if roles and p.player_id in roles else (2, -have[p.player_id][1]))
         cursor += n
+        xs = [(i + 1) / (n + 1) for i in range(n)]
+        if impect_lines:
+            sides = [roles[p.player_id][1] for p in group]
+            # Distinct sides: Impect's fixed lanes; otherwise spread evenly over its width.
+            xs = [_SIDE_X[sd] for sd in sides] if len(set(sides)) == n else \
+                [.125 + .75 * (i + 1) / (n + 1) for i in range(n)]
         for i, p in enumerate(group):
-            x = (i + 1) / (n + 1)
             role = roles[p.player_id][0] if roles and p.player_id in roles else labels[r - 1][i]
-            slots.append({"player": p, "row": r, "x": x, "role": role, "rows": len(rows) + 1})
+            slot = {"player": p, "row": r, "x": xs[i], "role": role, "rows": len(rows) + 1}
+            if impect_lines:
+                slot["pitch"] = (xs[i], _ROLE_Y.get(role, .6))   # Impect's own placement on the pitch
+            slots.append(slot)
+    if impect_lines:
+        slots[0]["pitch"] = (.5, _ROLE_Y["GK"])
     return slots
 
 
 def build_team_sheets(f7, f24_events: pd.DataFrame,
                       avg_positions: dict[str, pd.DataFrame] | None = None,
                       to_adj=None,
-                      impect_events: pd.DataFrame | None = None) -> tuple[dict[str, TeamSheet], float]:
+                      impect_events: pd.DataFrame | None = None,
+                      impect_info: dict | None = None) -> tuple[dict[str, TeamSheet], float]:
     """``({"home": sheet, "away": sheet}, match_end_minute)``.
 
     ``avg_positions`` is ``DvmsMatch.avg_positions`` (per-side frames with
@@ -258,7 +298,8 @@ def build_team_sheets(f7, f24_events: pd.DataFrame,
         sheet = TeamSheet(team_id=meta.team_id, side=side, name=meta.name,
                           formation=meta.formation, players=list(players.values()))
         positions = _positions_for(avg_positions, side, to_adj, sheet) or impect_positions(impect_events, sheet)
-        _assign_roles(sheet, positions, impect_roles(impect_events, sheet))
+        _assign_roles(sheet, positions,
+                      impect_roles(impect_events, sheet, impect_team_info(impect_info, impect_events, sheet)))
         sheets[side] = sheet
     return sheets, match_end
 
@@ -365,20 +406,49 @@ def impect_role(position: str | None, side: str | None) -> str | None:
     return label
 
 
-def impect_roles(events: pd.DataFrame | None, sheet: TeamSheet) -> dict[str, tuple[str, int]] | None:
-    """F7 player id -> (role label, left-to-right rank) from Impect's own
-    position tags (the most frequent tag across the player's events)."""
+def impect_team_info(info: dict | None, events: pd.DataFrame | None, sheet: TeamSheet) -> dict | None:
+    """This team's entry from ``impect_cafcdb_source.load_match_info`` (keyed by
+    Impect squad id, found through the events' squad name), or None."""
     squad = _impect_squad(events, sheet)
-    if squad is None or "playerPosition" not in squad.columns:
+    if not info or squad is None or "squadId" not in squad.columns:
         return None
-    squad = squad[squad["playerPosition"].notna()]
+    ids = squad["squadId"].dropna()
+    return info.get(int(ids.iloc[0])) if not ids.empty else None
+
+
+def impect_roles(events: pd.DataFrame | None, sheet: TeamSheet,
+                 team_info: dict | None = None) -> dict[str, tuple[str, int]] | None:
+    """F7 player id -> (role label, left-to-right rank) from Impect's own
+    position tags, for the *starting* shape.
+
+    Impect's team sheet (``team_info["starting"]``, from MATCH_INFO) is used
+    when present. Otherwise each player takes the tag on their first event of
+    the match: Impect re-tags every event after a substitution or change of
+    system, so a whole-match majority would put a winger moved to centre-back
+    at half-time (Reach, Lincoln away at Charlton, 4-4-2 to 5-2-1-2) in the
+    back line.
+    """
+    squad = _impect_squad(events, sheet)
+    if squad is None:
+        return None
+    starting = (team_info or {}).get("starting") or {}
+    if not starting and "playerPosition" not in squad.columns:
+        return None
+    tagged = squad[squad["playerPosition"].notna()] if "playerPosition" in squad.columns else squad.iloc[0:0]
+    order = [c for c in ("periodId", "gameTimeInSec", "eventNumber") if c in tagged.columns]
+    if order:
+        tagged = tagged.sort_values(order, kind="stable")
     names = _impect_names(squad, sheet)
     out: dict[str, tuple[str, int]] = {}
     for pid, name in names.items():
         rows = squad[squad["playerName"] == name]
-        if rows.empty:
-            continue
-        pair = rows.groupby(["playerPosition", "playerPositionSide"], dropna=False).size().idxmax()
+        ids = [int(i) for i in rows["playerId"].dropna().unique()] if "playerId" in rows.columns else []
+        pair = next((starting[i] for i in ids if i in starting), None)
+        if pair is None:
+            first = tagged[tagged["playerName"] == name]
+            if first.empty:
+                continue
+            pair = (first.iloc[0]["playerPosition"], first.iloc[0].get("playerPositionSide"))
         role = impect_role(pair[0], pair[1])
         if role is not None:
             out[pid] = (role, _SIDE_RANK.get(pair[1] if isinstance(pair[1], str) else "CENTRE", 2))
@@ -481,30 +551,62 @@ def lineup_chart(slots: list[dict[str, Any]], is_charlton: bool, match_end: floa
         rows.setdefault(s["row"], []).append(s)
     names: dict[int, list[Any]] = {}
     size = 7.8                                                         # one type size for every name
+    rooms: dict[int, list[float]] = {}
     for row, members in rows.items():
-        room = (56 / (len(members) + 1) if len(members) > 1 else 56) - 1.2   # slot width, less a gap
+        members.sort(key=lambda m: m["x"])
+        xs = [m["pitch"][0] * 68 if "pitch" in m else (6 + m["x"] * 56 if row else 34) for m in members]
+        # Each name may use the space up to halfway to its neighbours, less a gap.
+        rooms[row] = [min([56.0] + [abs(xs[i] - xs[j]) for j in (i - 1, i + 1) if 0 <= j < len(xs)]) - 1.2
+                      for i in range(len(xs))]
         names[row] = []
-        for m in members:
+        for m, x, room in zip(members, xs, rooms[row]):
             name = m["player"].last_name.split()[-1]
-            t = ax.text(6 + m["x"] * 56 if row else 34, 0, name, ha="center", va="top", fontsize=7.8,
+            t = ax.text(x, 0, name, ha="center", va="top", fontsize=7.8,
                         fontweight="bold", color=palette.INK, zorder=4, linespacing=1.0)
             if extent(t)[0] > room:
                 t.set_text(_wrap_name(name))
             names[row].append(t)
-        widest = max(extent(t)[0] for t in names[row])
-        size = min(size, max(5.4, 7.8 * room / widest))
+            size = min(size, max(5.4, 7.8 * room / extent(t)[0]))
+    for t in (t for ts in names.values() for t in ts):
+        t.set_fontsize(size)
+    labels: list[tuple[list[Any], tuple[float, float]]] = []
+    discs: list[tuple[float, float]] = []
     for row, members in rows.items():
-        y = 9 + row * (84 / max(n_rows - 1, 1))
-        for m, t in zip(members, names[row]):
+        texts = names[row]
+        # Still too wide at the smallest type: drop every other name a line so
+        # neighbours never print over each other.
+        clash = any(extent(texts[i])[0] / 2 + extent(texts[i + 1])[0] / 2 + .6
+                    > texts[i + 1].get_position()[0] - texts[i].get_position()[0] for i in range(len(texts) - 1))
+        for i, (m, t) in enumerate(zip(members, texts)):
             player, x = m["player"], t.get_position()[0]
+            y = m["pitch"][1] * 105 if "pitch" in m else 9 + row * (84 / max(n_rows - 1, 1))
             ax.scatter([x], [y], s=430, c=colour, edgecolors=palette.PAPER, linewidths=1.6, zorder=3)
             ax.text(x, y, "" if player.shirt is None else str(player.shirt), ha="center", va="center",
                     fontsize=10.5, fontweight="bold", color="white", zorder=4)
-            t.set_fontsize(size)
-            t.set_y(y - 6.0)
+            top = y - 6.0 - (extent(t)[1] + .4 if clash and i % 2 else 0.0)
+            t.set_y(top)
+            label = [t]
             if player.off_min is not None:
-                ax.text(x, y - 6.0 - extent(t)[1] - .6, f"▼ {int(player.off_min)}'", ha="center", va="top",
-                        fontsize=min(6.6, size), color=palette.MUTED, zorder=4)
+                label.append(ax.text(x, top - extent(t)[1] - .6, f"▼ {int(player.off_min)}'", ha="center",
+                                     va="top", fontsize=min(6.6, size), color=palette.MUTED, zorder=4))
+            labels.append((label, (x, y)))
+            discs.append((x, y))
+    # A name block that lands on another player's disc (a holding midfielder
+    # just below a central pair, on Impect's spacing) slides sideways clear of it.
+    r = 5.6                                                            # disc radius plus its rim, in pitch units
+    for label, own in labels:
+        for dx, dy in discs:
+            if (dx, dy) == own:
+                continue
+            x0 = min(t.get_position()[0] - extent(t)[0] / 2 for t in label)
+            x1 = max(t.get_position()[0] + extent(t)[0] / 2 for t in label)
+            y_top = label[0].get_position()[1]
+            y_bottom = min(t.get_position()[1] - extent(t)[1] for t in label)
+            if y_bottom > dy + r or y_top < dy - r or x1 < dx - r or x0 > dx + r:
+                continue
+            shift = (dx + r - x0 + .4) if (x0 + x1) / 2 >= dx else -(x1 - (dx - r) + .4)
+            for t in label:
+                t.set_x(t.get_position()[0] + shift)
     return _png_uri(fig, tight=False)
 
 
@@ -742,20 +844,25 @@ def half_time_score(f7, f24_events: pd.DataFrame) -> dict[str, int]:
 
 
 def overview_context(f7, f24_events: pd.DataFrame, avg_positions, to_adj, impect_events: pd.DataFrame,
-                     subject: str) -> dict[str, Any]:
+                     subject: str, impect_info: dict | None = None) -> dict[str, Any]:
     """Everything the overview page needs: per-team sheet rows, lineup images
-    and the timeline image. Teams are ordered subject first."""
-    sheets, match_end = build_team_sheets(f7, f24_events, avg_positions, to_adj, impect_events)
+    and the timeline image. Teams are ordered subject first.
+
+    ``impect_info`` is ``impect_cafcdb_source.load_match_info``: Impect's
+    starting positions and kick-off formation, which the lineup and its
+    formation label follow when present (Opta's F7 formation otherwise)."""
+    sheets, match_end = build_team_sheets(f7, f24_events, avg_positions, to_adj, impect_events, impect_info)
     ordered = sorted(sheets.values(), key=lambda sh: sh.name.lower() != subject.lower())
     cards = []
     for sheet in ordered:
         is_subject = sheet.name.lower() == subject.lower()
+        team_info = impect_team_info(impect_info, impect_events, sheet)
         slots = lineup_slots(sheet, _positions_for(avg_positions, sheet.side, to_adj, sheet)
-                             or impect_positions(impect_events, sheet), impect_roles(impect_events, sheet))
+                             or impect_positions(impect_events, sheet), impect_roles(impect_events, sheet, team_info))
         used = [p for p in sheet.substitutes if p.played]
         cards.append({
             "name": sheet.name, "is_charlton": is_subject,
-            "formation": _formation_label(sheet.formation),
+            "formation": (team_info or {}).get("formation") or _formation_label(sheet.formation),
             "lineup_img": lineup_chart(slots, is_subject, match_end) if slots else "",
             "starters": _sheet_rows(sheet.starters, match_end),
             "subs": _sheet_rows(used, match_end),

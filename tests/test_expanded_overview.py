@@ -239,3 +239,80 @@ def test_timeline_row_labels_never_overlap_each_other_or_a_marker():
     assert all(not (s < k < e) for s, e in spans for k in markers)
     assert all(e <= 98.0 for _, e in spans) and all(s >= 0 for s, _ in spans)
     assert any(t[0].text.endswith("…") for _, t in items[2:])      # the late crush is shortened, not overprinted
+
+
+def test_impect_roles_use_the_starting_tag_not_the_whole_match_majority():
+    """Lincoln at Charlton: 4-4-2 (flat) with Reach at right wing, then 5-2-1-2 at
+    half-time with Reach at left centre-back. He has more events at LCB than at RW,
+    but the lineup shows the starting shape."""
+    sheets, _ = ov.build_team_sheets(_f7(), _f24([]))
+    home = sheets["home"]
+    tags = {   # player -> (first-half tag, second-half tag)
+        "Def1": (("LEFT_WINGBACK_DEFENDER", "LEFT"),) * 2,
+        "Def2": (("CENTRAL_DEFENDER", "CENTRE_LEFT"),) * 2,
+        "Def3": (("CENTRAL_DEFENDER", "CENTRE_RIGHT"),) * 2,
+        "Def4": (("RIGHT_WINGBACK_DEFENDER", "RIGHT"),) * 2,
+        "Mid1": (("LEFT_WINGER", "LEFT"), ("ATTACKING_MIDFIELD", "CENTRE")),
+        "Mid2": (("DEFENSE_MIDFIELD", "CENTRE_LEFT"),) * 2,
+        "Mid3": (("DEFENSE_MIDFIELD", "CENTRE_RIGHT"),) * 2,
+        "Mid4": (("RIGHT_WINGER", "RIGHT"), ("CENTRAL_DEFENDER", "CENTRE_LEFT")),
+        "Str1": (("CENTER_FORWARD", "CENTRE_LEFT"),) * 2,
+        "Str2": (("CENTER_FORWARD", "CENTRE_RIGHT"),) * 2,
+    }
+    rows, n = [], 0
+    for name, (first, second) in tags.items():
+        for period, (pos, side), count in ((1, first, 2), (2, second, 5)):   # more second-half events
+            for k in range(count):
+                n += 1
+                rows.append(dict(squadName="Home FC", playerName=name, periodId=period,
+                                 gameTimeInSec=(0 if period == 1 else 10000) + 60 * k, eventNumber=n,
+                                 playerPosition=pos, playerPositionSide=side,
+                                 startAdjCoordinatesX=0.0, startAdjCoordinatesY=0.0))
+    events = pd.DataFrame(rows).sample(frac=1.0, random_state=0)   # order must come from the clock
+    roles = ov.impect_roles(events, home)
+    assert roles["hm4"][0] == "RW" and roles["hm1"][0] == "LW"
+    # Whole-match tracking would put the right winger deep; the starting tags win.
+    pos = _positions(home)
+    pos["hm4"] = (-25.0, 10.0)
+    slots = ov.lineup_slots(home, pos, roles)
+    by_row = {r: [s["role"] for s in slots if s["row"] == r] for r in (1, 2, 3, 4)}
+    # Impect draws a 4-4-2 (flat) with the wingers ahead of the two holding midfielders.
+    assert by_row == {1: ["LB", "LCB", "RCB", "RB"], 2: ["LDM", "RDM"], 3: ["LW", "RW"], 4: ["CF", "CF"]}
+    wide = {s["role"]: s["x"] for s in slots if s["row"] == 3}
+    assert wide["LW"] < .2 and wide["RW"] > .8                  # wingers on the touchlines, not bunched
+    # Impect's heights: wingers just behind the strikers, full-backs a touch ahead of the centre-backs.
+    y = {s["role"]: s["pitch"][1] for s in slots}
+    assert y["LB"] > y["LCB"] and y["LDM"] < y["LW"] < y["CF"] and y["CF"] - y["LW"] < y["LW"] - y["LDM"]
+    assert slots[0]["pitch"] == (.5, .11)
+
+
+def test_impect_match_info_is_parsed_to_kick_off_formation_and_starting_positions():
+    from src.report.impect_cafcdb_source import parse_match_info
+    import json
+    row = {"home_squad_id": 10, "away_squad_id": 20,
+           "home_starting": json.dumps([{"playerId": 1, "position": "RIGHT_WINGER", "positionSide": "RIGHT"}]),
+           "away_starting": None,
+           "home_formations": json.dumps([{"formation": "5-2-1-2", "gameTimeInSec": 10000},
+                                          {"formation": "4-4-2 (flat)", "gameTimeInSec": 0}]),
+           "away_formations": "not json"}
+    info = parse_match_info(row)
+    assert info[10] == {"formation": "4-4-2 (flat)", "starting": {1: ("RIGHT_WINGER", "RIGHT")}}
+    assert info[20] == {"formation": "", "starting": {}}
+    assert parse_match_info(None) == {}
+
+
+def test_impects_team_sheet_beats_event_tags_for_the_starting_role():
+    sheets, _ = ov.build_team_sheets(_f7(), _f24([]))
+    home = sheets["home"]
+    events = pd.DataFrame({"squadName": ["Home FC"] * 2, "squadId": [10, 10], "playerId": [7, 8],
+                           "playerName": ["Mid4", "Mid1"], "periodId": [1, 1], "gameTimeInSec": [5, 6],
+                           "eventNumber": [1, 2],
+                           "playerPosition": ["CENTRAL_DEFENDER", "LEFT_WINGER"],
+                           "playerPositionSide": ["CENTRE_LEFT", "LEFT"]})
+    info = {10: {"formation": "4-4-2 (flat)", "starting": {7: ("RIGHT_WINGER", "RIGHT")}}}
+    team = ov.impect_team_info(info, events, home)
+    assert team["formation"] == "4-4-2 (flat)"
+    roles = ov.impect_roles(events, home, team)
+    assert roles["hm4"] == ("RW", 4)          # from Impect's team sheet, not the first event
+    assert roles["hm1"] == ("LW", 0)          # not on the sheet: first event's tag
+    assert ov.impect_team_info(None, events, home) is None

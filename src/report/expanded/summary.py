@@ -90,7 +90,10 @@ def how_it_went(gs: dict[str, Any], stats: pd.DataFrame, subject: str, opponent:
                      f"times a minute before the break and {b['pressures_per_min']:.1f} after it.")
     after = next((r for r in gs.get("other", []) if r["label"] == "After the first substitution"), None)
     before = next((r for r in gs.get("other", []) if r["label"].startswith("Before the first substitution")), None)
-    if before and after:
+    # A first change at half-time splits the game exactly as the halves do; skip the repeat.
+    same = lambda r, h: h is not None and (f"{r['xg_for']:.2f}", f"{r['xg_against']:.2f}") == (
+        f"{h['xg_for']:.2f}", f"{h['xg_against']:.2f}")
+    if before and after and not (same(before, halves.get("First half")) and same(after, halves.get("Second half"))):
         lines.append(f"{before['label'].split('(')[1].rstrip(')')} was the first change: xG was "
                      f"{before['xg_for']:.2f}–{before['xg_against']:.2f} before it and {after['xg_for']:.2f}–"
                      f"{after['xg_against']:.2f} after it.")
@@ -109,7 +112,7 @@ def against_the_season(match_values: dict[str, float], baseline: pd.DataFrame,
     ranked.sort()
     sentence = lambda pct, label, col: (
         f"{label}: {_fmt(col, match_values[col])} against an average of {_fmt(col, float(baseline[col].mean()))} "
-        f"({_ordinal(round(pct))} percentile of {len(baseline)} matches)")
+        f"({_ordinal(round(pct))} percentile)")         # the card heading already gives the match count
     return {"above": [sentence(*r) for r in reversed(ranked[-n:])], "below": [sentence(*r) for r in ranked[:n]]}
 
 
